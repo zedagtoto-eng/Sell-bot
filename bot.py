@@ -23,10 +23,10 @@ TERMS_CHANNEL_ID = 1545851197767024772
 # Put 0 if only the server owner should be allowed.
 STAFF_ROLE_ID = 1546004683871490170
 
-# Optional banner image
-TICKETS_BANNER_URL = "https://i.imgur.com/XGPo1uo.png"
+# Your ticket panel banner
+TICKETS_BANNER_URL = "https://i.imgur.com/0MxHVkI.png"
 
-# Bluish color
+# Discord blurple / blue
 EMBED_COLOR = discord.Color.from_rgb(88, 101, 242)
 
 
@@ -81,12 +81,10 @@ def ticket_id(channel_id: int):
 
 def is_owner_or_staff(member):
 
-    # Server owner
     if member.guild.owner_id == member.id:
 
         return True
 
-    # Staff role
     if STAFF_ROLE_ID:
 
         role = member.guild.get_role(
@@ -112,7 +110,6 @@ def get_staff_overwrite(
 
     }
 
-    # Staff role permissions
     if STAFF_ROLE_ID:
 
         role = guild.get_role(
@@ -131,7 +128,6 @@ def get_staff_overwrite(
 
             )
 
-    # Bot permissions
     overwrites[guild.me] = discord.PermissionOverwrite(
 
         view_channel=True,
@@ -343,7 +339,7 @@ a {{
 
 <body>
 
-<h1>R&D Market Ticket Transcript</h1>
+<h1>Elite Stock Ticket Transcript</h1>
 
 <p>
 Channel: #{html.escape(channel.name)}
@@ -380,7 +376,7 @@ Channel: #{html.escape(channel.name)}
 
 
 # ============================================================
-# MAIN PANEL
+# MAIN ORDER PANEL
 # ============================================================
 
 class OrderTypeSelect(
@@ -394,7 +390,7 @@ class OrderTypeSelect(
             discord.SelectOption(
 
                 label="Purchase",
-                description="Buy a product or service",
+                description="Create a ticket to purchase a product.",
                 emoji="🛒",
                 value="purchase"
 
@@ -403,7 +399,7 @@ class OrderTypeSelect(
             discord.SelectOption(
 
                 label="Support",
-                description="Get help or ask a question",
+                description="Create a ticket if you need assistance.",
                 emoji="🔧",
                 value="support"
 
@@ -468,23 +464,19 @@ def order_panel_embed():
 
     embed = discord.Embed(
 
+        title="Order Panel",
+
         description=(
 
-            "# 🎫 Ticket\n\n"
-
-            "Welcome to **R&D Market**.\n"
-            "Please select an option below to "
-            "open a ticket.\n\n"
+            "Create a service request with **Elite Stock**.\n"
+            "Our team will be with you shortly.\n\n"
 
             "━━━━━━━━━━━━━━━━━━━━\n\n"
 
-            "## ☷ How can we help?\n\n"
+            "☷ **Start your order**\n\n"
 
-            "🛒 **Purchase**\n"
-            "Create a ticket to purchase a product.\n\n"
-
-            "🔧 **Support**\n"
-            "Create a ticket if you need assistance.\n\n"
+            "› Select a service from the menu below to "
+            "open your ticket.\n\n"
 
             "━━━━━━━━━━━━━━━━━━━━"
 
@@ -494,14 +486,7 @@ def order_panel_embed():
 
     )
 
-    if (
-
-        TICKETS_BANNER_URL
-        and
-        "your-image-url-here"
-        not in TICKETS_BANNER_URL
-
-    ):
+    if TICKETS_BANNER_URL:
 
         embed.set_image(
             url=TICKETS_BANNER_URL
@@ -509,7 +494,7 @@ def order_panel_embed():
 
     embed.set_footer(
 
-        text="Ticket • R&D Market"
+        text="🛡️ Elite Stock • Ticket System"
 
     )
 
@@ -566,7 +551,6 @@ class PurchaseTermsView(
 
                     label="Terms of Service",
                     emoji="📜",
-
                     style=discord.ButtonStyle.link,
 
                     url=(
@@ -582,9 +566,7 @@ class PurchaseTermsView(
     @discord.ui.button(
 
         label="Accept and Continue",
-
         emoji="✅",
-
         style=discord.ButtonStyle.success
 
     )
@@ -592,9 +574,7 @@ class PurchaseTermsView(
     async def accept(
 
         self,
-
         interaction: discord.Interaction,
-
         button: discord.ui.Button
 
     ):
@@ -602,7 +582,6 @@ class PurchaseTermsView(
         await interaction.response.edit_message(
 
             embed=payment_embed(),
-
             view=PaymentView()
 
         )
@@ -611,9 +590,7 @@ class PurchaseTermsView(
     @discord.ui.button(
 
         label="Cancel",
-
         emoji="✖️",
-
         style=discord.ButtonStyle.secondary
 
     )
@@ -621,9 +598,7 @@ class PurchaseTermsView(
     async def cancel(
 
         self,
-
         interaction: discord.Interaction,
-
         button: discord.ui.Button
 
     ):
@@ -631,9 +606,7 @@ class PurchaseTermsView(
         await interaction.response.edit_message(
 
             content="❌ Purchase cancelled.",
-
             embed=None,
-
             view=None
 
         )
@@ -674,9 +647,7 @@ class PaymentButton(
     def __init__(
 
         self,
-
         payment_name: str,
-
         emoji: str
 
     ):
@@ -684,9 +655,7 @@ class PaymentButton(
         super().__init__(
 
             label=payment_name,
-
             emoji=emoji,
-
             style=discord.ButtonStyle.secondary
 
         )
@@ -697,7 +666,6 @@ class PaymentButton(
     async def callback(
 
         self,
-
         interaction: discord.Interaction
 
     ):
@@ -705,7 +673,6 @@ class PaymentButton(
         await create_purchase_ticket(
 
             interaction,
-
             self.payment_name
 
         )
@@ -722,30 +689,15 @@ class PaymentView(
         )
 
         self.add_item(
-
-            PaymentButton(
-                "SOL",
-                "🟣"
-            )
-
+            PaymentButton("SOL", "🟣")
         )
 
         self.add_item(
-
-            PaymentButton(
-                "LTC",
-                "🟢"
-            )
-
+            PaymentButton("LTC", "🟢")
         )
 
         self.add_item(
-
-            PaymentButton(
-                "Other",
-                "💳"
-            )
-
+            PaymentButton("Other", "💳")
         )
 
 
@@ -756,7 +708,6 @@ class PaymentView(
 async def create_purchase_ticket(
 
     interaction: discord.Interaction,
-
     payment_method: str
 
 ):
@@ -764,7 +715,6 @@ async def create_purchase_ticket(
     await interaction.response.defer(
 
         ephemeral=True,
-
         thinking=True
 
     )
@@ -776,7 +726,6 @@ async def create_purchase_ticket(
     channel = await create_ticket_channel(
 
         interaction,
-
         f"purchase-{short_id}"
 
     )
@@ -784,11 +733,8 @@ async def create_purchase_ticket(
     tickets[channel.id] = {
 
         "owner_id": interaction.user.id,
-
         "type": "purchase",
-
         "payment": payment_method,
-
         "product": "Not selected"
 
     }
@@ -810,9 +756,7 @@ async def create_purchase_ticket(
         embed=purchase_ticket_embed(
 
             interaction.user,
-
             payment_method,
-
             "Not selected"
 
         ),
@@ -824,7 +768,6 @@ async def create_purchase_ticket(
     await channel.send(
 
         embed=product_selection_embed(),
-
         view=ProductSelectView()
 
     )
@@ -842,9 +785,7 @@ async def create_purchase_ticket(
 def purchase_ticket_embed(
 
     user,
-
     payment_method,
-
     product
 
 ):
@@ -927,7 +868,6 @@ class ProductCategorySelect(
         super().__init__(
 
             placeholder="Select a product category",
-
             options=options
 
         )
@@ -936,7 +876,6 @@ class ProductCategorySelect(
     async def callback(
 
         self,
-
         interaction: discord.Interaction
 
     ):
@@ -986,9 +925,7 @@ class PurchaseCloseView(
     @discord.ui.button(
 
         label="Close Ticket",
-
         emoji="🔒",
-
         style=discord.ButtonStyle.secondary
 
     )
@@ -996,9 +933,7 @@ class PurchaseCloseView(
     async def close_ticket(
 
         self,
-
         interaction: discord.Interaction,
-
         button: discord.ui.Button
 
     ):
@@ -1033,11 +968,8 @@ class SupportModal(
     concern = discord.ui.TextInput(
 
         label="What is your concern?",
-
         style=discord.TextStyle.paragraph,
-
         required=True,
-
         max_length=4000
 
     )
@@ -1046,7 +978,6 @@ class SupportModal(
     async def on_submit(
 
         self,
-
         interaction: discord.Interaction
 
     ):
@@ -1054,7 +985,6 @@ class SupportModal(
         await interaction.response.defer(
 
             ephemeral=True,
-
             thinking=True
 
         )
@@ -1066,7 +996,6 @@ class SupportModal(
         channel = await create_ticket_channel(
 
             interaction,
-
             f"support-{short_id}"
 
         )
@@ -1074,9 +1003,7 @@ class SupportModal(
         tickets[channel.id] = {
 
             "owner_id": interaction.user.id,
-
             "type": "support",
-
             "concern": str(
                 self.concern
             )
@@ -1100,9 +1027,7 @@ class SupportModal(
             embed=support_ticket_embed(
 
                 interaction.user,
-
                 channel,
-
                 str(self.concern)
 
             ),
@@ -1124,9 +1049,7 @@ class SupportModal(
 def support_ticket_embed(
 
     user,
-
     channel,
-
     concern
 
 ):
@@ -1171,9 +1094,7 @@ class RenameModal(
     name = discord.ui.TextInput(
 
         label="New ticket name",
-
         required=True,
-
         max_length=80
 
     )
@@ -1182,7 +1103,6 @@ class RenameModal(
     async def on_submit(
 
         self,
-
         interaction: discord.Interaction
 
     ):
@@ -1194,7 +1114,6 @@ class RenameModal(
             return await interaction.response.send_message(
 
                 "❌ You do not have permission.",
-
                 ephemeral=True
 
             )
@@ -1209,9 +1128,7 @@ class RenameModal(
 
         await interaction.response.send_message(
 
-            f"✅ Ticket renamed to "
-            f"`{new_name}`",
-
+            f"✅ Ticket renamed to `{new_name}`",
             ephemeral=True
 
         )
@@ -1225,9 +1142,7 @@ class AddUserModal(
     user_id = discord.ui.TextInput(
 
         label="User ID",
-
         required=True,
-
         placeholder="Paste the Discord user ID"
 
     )
@@ -1236,7 +1151,6 @@ class AddUserModal(
     async def on_submit(
 
         self,
-
         interaction: discord.Interaction
 
     ):
@@ -1248,7 +1162,6 @@ class AddUserModal(
             return await interaction.response.send_message(
 
                 "❌ You do not have permission.",
-
                 ephemeral=True
 
             )
@@ -1268,7 +1181,6 @@ class AddUserModal(
                 return await interaction.response.send_message(
 
                     "❌ User not found.",
-
                     ephemeral=True
 
                 )
@@ -1276,19 +1188,15 @@ class AddUserModal(
             await interaction.channel.set_permissions(
 
                 member,
-
                 view_channel=True,
-
                 send_messages=True,
-
                 read_message_history=True
 
             )
 
             await interaction.response.send_message(
 
-                f"✅ Added "
-                f"{member.mention} "
+                f"✅ Added {member.mention} "
                 f"to this ticket.",
 
                 ephemeral=True
@@ -1300,7 +1208,6 @@ class AddUserModal(
             await interaction.response.send_message(
 
                 "❌ Invalid user ID.",
-
                 ephemeral=True
 
             )
@@ -1320,9 +1227,7 @@ class TicketControlsView(
     @discord.ui.button(
 
         label="Mark Completed",
-
         emoji="✅",
-
         style=discord.ButtonStyle.secondary
 
     )
@@ -1330,9 +1235,7 @@ class TicketControlsView(
     async def completed(
 
         self,
-
         interaction: discord.Interaction,
-
         button: discord.ui.Button
 
     ):
@@ -1344,7 +1247,6 @@ class TicketControlsView(
             return await interaction.response.send_message(
 
                 "❌ Staff only.",
-
                 ephemeral=True
 
             )
@@ -1360,9 +1262,7 @@ class TicketControlsView(
     @discord.ui.button(
 
         label="Save Transcript",
-
         emoji="📄",
-
         style=discord.ButtonStyle.secondary
 
     )
@@ -1370,9 +1270,7 @@ class TicketControlsView(
     async def save_transcript(
 
         self,
-
         interaction: discord.Interaction,
-
         button: discord.ui.Button
 
     ):
@@ -1384,7 +1282,6 @@ class TicketControlsView(
             return await interaction.response.send_message(
 
                 "❌ Staff only.",
-
                 ephemeral=True
 
             )
@@ -1396,9 +1293,7 @@ class TicketControlsView(
         await interaction.response.send_message(
 
             "📄 Transcript generated.",
-
             file=file,
-
             ephemeral=True
 
         )
@@ -1407,9 +1302,7 @@ class TicketControlsView(
     @discord.ui.button(
 
         label="Rename",
-
         emoji="✏️",
-
         style=discord.ButtonStyle.secondary
 
     )
@@ -1417,9 +1310,7 @@ class TicketControlsView(
     async def rename(
 
         self,
-
         interaction: discord.Interaction,
-
         button: discord.ui.Button
 
     ):
@@ -1431,24 +1322,19 @@ class TicketControlsView(
             return await interaction.response.send_message(
 
                 "❌ Staff only.",
-
                 ephemeral=True
 
             )
 
         await interaction.response.send_modal(
-
             RenameModal()
-
         )
 
 
     @discord.ui.button(
 
         label="Close Ticket",
-
         emoji="🔒",
-
         style=discord.ButtonStyle.danger
 
     )
@@ -1456,9 +1342,7 @@ class TicketControlsView(
     async def close(
 
         self,
-
         interaction: discord.Interaction,
-
         button: discord.ui.Button
 
     ):
@@ -1470,7 +1354,6 @@ class TicketControlsView(
             return await interaction.response.send_message(
 
                 "❌ Staff only.",
-
                 ephemeral=True
 
             )
@@ -1483,9 +1366,7 @@ class TicketControlsView(
     @discord.ui.button(
 
         label="Add a user",
-
         emoji="➕",
-
         style=discord.ButtonStyle.secondary
 
     )
@@ -1493,9 +1374,7 @@ class TicketControlsView(
     async def add_user(
 
         self,
-
         interaction: discord.Interaction,
-
         button: discord.ui.Button
 
     ):
@@ -1507,15 +1386,12 @@ class TicketControlsView(
             return await interaction.response.send_message(
 
                 "❌ Staff only.",
-
                 ephemeral=True
 
             )
 
         await interaction.response.send_modal(
-
             AddUserModal()
-
         )
 
 
@@ -1534,7 +1410,6 @@ async def close_ticket_system(
         return await interaction.response.send_message(
 
             "❌ This ticket is not registered.",
-
             ephemeral=True
 
         )
@@ -1562,7 +1437,6 @@ async def close_ticket_system(
             owner = None
 
 
-    # Send transcript to owner
     if owner:
 
         try:
@@ -1575,7 +1449,7 @@ async def close_ticket_system(
 
             await owner.send(
 
-                "📄 Your **R&D Market** ticket "
+                "📄 Your **Elite Stock** ticket "
                 "has been closed.\n\n"
                 "Here is your transcript:",
 
@@ -1588,11 +1462,8 @@ async def close_ticket_system(
             pass
 
 
-    # Send transcript to logs
     log_channel = interaction.guild.get_channel(
-
         TRANSCRIPT_CHANNEL_ID
-
     )
 
     if isinstance(
@@ -1662,7 +1533,6 @@ async def close_ticket_system(
 @bot.command()
 async def panel(ctx):
 
-    # Optional: owner/staff only
     if not is_owner_or_staff(
         ctx.author
     ):
@@ -1677,7 +1547,6 @@ async def panel(ctx):
     await ctx.send(
 
         embed=order_panel_embed(),
-
         view=OrderPanelView()
 
     )
@@ -1690,7 +1559,6 @@ async def panel(ctx):
 @bot.command()
 async def close(ctx):
 
-    # OWNER OR STAFF ONLY
     if not is_owner_or_staff(
         ctx.author
     ):
@@ -1737,7 +1605,6 @@ async def close(ctx):
             owner = None
 
 
-    # DM owner
     if owner:
 
         try:
@@ -1750,7 +1617,7 @@ async def close(ctx):
 
             await owner.send(
 
-                "📄 Your **R&D Market** ticket "
+                "📄 Your **Elite Stock** ticket "
                 "has been closed.\n\n"
                 "Here is your transcript:",
 
@@ -1763,11 +1630,8 @@ async def close(ctx):
             pass
 
 
-    # Transcript logs
     log_channel = ctx.guild.get_channel(
-
         TRANSCRIPT_CHANNEL_ID
-
     )
 
     if isinstance(
@@ -1824,14 +1688,11 @@ async def close(ctx):
 async def say(
 
     ctx,
-
     *,
-
     message: str
 
 ):
 
-    # OWNER OR STAFF ONLY
     if not is_owner_or_staff(
         ctx.author
     ):
@@ -1881,10 +1742,24 @@ async def say_error(
 @bot.event
 async def on_ready():
 
+    bot.add_view(
+        OrderPanelView()
+    )
+
+    bot.add_view(
+        ProductSelectView()
+    )
+
+    bot.add_view(
+        PurchaseCloseView()
+    )
+
+    bot.add_view(
+        TicketControlsView()
+    )
+
     print(
-
         f"Logged in as {bot.user}"
-
     )
 
 
