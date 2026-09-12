@@ -14,20 +14,34 @@ from discord.ext import commands
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 
-# Put your IDs here
+# Ticket IDs
 TICKET_CATEGORY_ID = 1546004427931123722
 TRANSCRIPT_CHANNEL_ID = 1546005594605879296
 TERMS_CHANNEL_ID = 1545851197767024772
 
-# Staff role allowed to use $say and $close
+# Staff role
 # Put 0 if only the server owner should be allowed.
 STAFF_ROLE_ID = 1546004683871490170
 
-# Your ticket panel banner
+# ============================================================
+# NOTIFICATION ROLE IDS
+# ============================================================
+
+RESTOCK_ROLE_ID = 1546881430829801593
+GIVEAWAY_ROLE_ID = 1548370880323915868
+EVENTS_ROLE_ID = 1548371070145269841
+
+# ============================================================
+# BANNER / COLOR
+# ============================================================
+
 TICKETS_BANNER_URL = "https://i.imgur.com/0MxHVkI.png"
 
-# Discord blurple / blue
-EMBED_COLOR = discord.Color.from_rgb(88, 101, 242)
+EMBED_COLOR = discord.Color.from_rgb(
+    88,
+    101,
+    242
+)
 
 
 # ============================================================
@@ -35,6 +49,7 @@ EMBED_COLOR = discord.Color.from_rgb(88, 101, 242)
 # ============================================================
 
 intents = discord.Intents.default()
+
 intents.message_content = True
 intents.members = True
 
@@ -82,7 +97,6 @@ def ticket_id(channel_id: int):
 def is_owner_or_staff(member):
 
     if member.guild.owner_id == member.id:
-
         return True
 
     if STAFF_ROLE_ID:
@@ -92,7 +106,6 @@ def is_owner_or_staff(member):
         )
 
         if role and role in member.roles:
-
             return True
 
     return False
@@ -104,7 +117,8 @@ def get_staff_overwrite(
 
     overwrites = {
 
-        guild.default_role: discord.PermissionOverwrite(
+        guild.default_role:
+        discord.PermissionOverwrite(
             view_channel=False
         )
 
@@ -118,26 +132,30 @@ def get_staff_overwrite(
 
         if role:
 
-            overwrites[role] = discord.PermissionOverwrite(
+            overwrites[role] = (
+                discord.PermissionOverwrite(
 
-                view_channel=True,
-                send_messages=True,
-                read_message_history=True,
-                attach_files=True,
-                embed_links=True
+                    view_channel=True,
+                    send_messages=True,
+                    read_message_history=True,
+                    attach_files=True,
+                    embed_links=True
 
+                )
             )
 
-    overwrites[guild.me] = discord.PermissionOverwrite(
+    overwrites[guild.me] = (
+        discord.PermissionOverwrite(
 
-        view_channel=True,
-        send_messages=True,
-        read_message_history=True,
-        manage_channels=True,
-        manage_messages=True,
-        attach_files=True,
-        embed_links=True
+            view_channel=True,
+            send_messages=True,
+            read_message_history=True,
+            manage_channels=True,
+            manage_messages=True,
+            attach_files=True,
+            embed_links=True
 
+        )
     )
 
     return overwrites
@@ -353,21 +371,16 @@ Channel: #{html.escape(channel.name)}
 """
 
     filename = (
-
         sanitize_channel_name(
             channel.name
         )
-
         + "-transcript.html"
-
     )
 
     return discord.File(
 
         fp=io.BytesIO(
-            transcript.encode(
-                "utf-8"
-            )
+            transcript.encode("utf-8")
         ),
 
         filename=filename
@@ -388,21 +401,17 @@ class OrderTypeSelect(
         options = [
 
             discord.SelectOption(
-
                 label="Purchase",
                 description="Create a ticket to purchase a product.",
                 emoji="🛒",
                 value="purchase"
-
             ),
 
             discord.SelectOption(
-
                 label="Support",
                 description="Create a ticket if you need assistance.",
                 emoji="🔧",
                 value="support"
-
             )
 
         ]
@@ -429,9 +438,7 @@ class OrderTypeSelect(
             await interaction.response.send_message(
 
                 embed=purchase_terms_embed(),
-
                 view=PurchaseTermsView(),
-
                 ephemeral=True
 
             )
@@ -439,9 +446,7 @@ class OrderTypeSelect(
         elif selected == "support":
 
             await interaction.response.send_modal(
-
                 SupportModal()
-
             )
 
 
@@ -493,9 +498,7 @@ def order_panel_embed():
         )
 
     embed.set_footer(
-
         text="🛡️ Elite Stock • Ticket System"
-
     )
 
     return embed
@@ -572,11 +575,9 @@ class PurchaseTermsView(
     )
 
     async def accept(
-
         self,
         interaction: discord.Interaction,
         button: discord.ui.Button
-
     ):
 
         await interaction.response.edit_message(
@@ -596,11 +597,9 @@ class PurchaseTermsView(
     )
 
     async def cancel(
-
         self,
         interaction: discord.Interaction,
         button: discord.ui.Button
-
     ):
 
         await interaction.response.edit_message(
@@ -645,11 +644,9 @@ class PaymentButton(
 ):
 
     def __init__(
-
         self,
         payment_name: str,
         emoji: str
-
     ):
 
         super().__init__(
@@ -664,10 +661,8 @@ class PaymentButton(
 
 
     async def callback(
-
         self,
         interaction: discord.Interaction
-
     ):
 
         await create_purchase_ticket(
@@ -874,10 +869,8 @@ class ProductCategorySelect(
 
 
     async def callback(
-
         self,
         interaction: discord.Interaction
-
     ):
 
         if interaction.channel.id in tickets:
@@ -1575,15 +1568,11 @@ async def close(ctx):
     if channel.id not in tickets:
 
         return await ctx.send(
-
             "❌ This is not a registered ticket."
-
         )
 
     await ctx.send(
-
         "🔒 Closing ticket and generating transcript..."
-
     )
 
     data = tickets[channel.id]
@@ -1729,10 +1718,290 @@ async def say_error(
     ):
 
         await ctx.send(
-
             "❌ Usage: `$say <message>`"
+        )
+
+
+# ============================================================
+# NOTIFICATION ROLE SYSTEM
+# ============================================================
+
+class NotificationRolesView(
+    discord.ui.View
+):
+
+    def __init__(self):
+
+        super().__init__(
+            timeout=None
+        )
+
+
+    async def toggle_role(
+
+        self,
+        interaction: discord.Interaction,
+        role_id: int,
+        role_name: str
+
+    ):
+
+        if interaction.guild is None:
+
+            return await interaction.response.send_message(
+
+                "❌ This can only be used inside a server.",
+                ephemeral=True
+
+            )
+
+
+        role = interaction.guild.get_role(
+            role_id
+        )
+
+        if role is None:
+
+            return await interaction.response.send_message(
+
+                f"❌ The **{role_name}** role was not found.",
+
+                ephemeral=True
+
+            )
+
+
+        member = interaction.guild.get_member(
+            interaction.user.id
+        )
+
+        if member is None:
+
+            return await interaction.response.send_message(
+
+                "❌ Member not found.",
+                ephemeral=True
+
+            )
+
+
+        try:
+
+            # =================================================
+            # REMOVE ROLE IF USER ALREADY HAS IT
+            # =================================================
+
+            if role in member.roles:
+
+                await member.remove_roles(
+
+                    role,
+
+                    reason="Notification role toggle"
+
+                )
+
+                await interaction.response.send_message(
+
+                    f"🔕 **{role_name}** removed.",
+
+                    ephemeral=True
+
+                )
+
+
+            # =================================================
+            # GIVE ROLE IF USER DOESN'T HAVE IT
+            # =================================================
+
+            else:
+
+                await member.add_roles(
+
+                    role,
+
+                    reason="Notification role toggle"
+
+                )
+
+                await interaction.response.send_message(
+
+                    f"🔔 **{role_name}** added!",
+
+                    ephemeral=True
+
+                )
+
+
+        except discord.Forbidden:
+
+            await interaction.response.send_message(
+
+                "❌ I can't manage this role.\n\n"
+                "Make sure the bot's highest role is "
+                "**above the notification roles**.",
+
+                ephemeral=True
+
+            )
+
+
+        except discord.HTTPException:
+
+            await interaction.response.send_message(
+
+                "❌ Discord returned an error. "
+                "Please try again.",
+
+                ephemeral=True
+
+            )
+
+
+    # ========================================================
+    # RESTOCK
+    # ========================================================
+
+    @discord.ui.button(
+
+        label="Restock Ping",
+        emoji="📦",
+        style=discord.ButtonStyle.secondary,
+        custom_id="notification_restock"
+
+    )
+
+    async def restock(
+
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+
+    ):
+
+        await self.toggle_role(
+
+            interaction,
+
+            RESTOCK_ROLE_ID,
+
+            "Restock Ping"
 
         )
+
+
+    # ========================================================
+    # GIVEAWAY
+    # ========================================================
+
+    @discord.ui.button(
+
+        label="Giveaway Ping",
+        emoji="🎁",
+        style=discord.ButtonStyle.secondary,
+        custom_id="notification_giveaway"
+
+    )
+
+    async def giveaway(
+
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+
+    ):
+
+        await self.toggle_role(
+
+            interaction,
+
+            GIVEAWAY_ROLE_ID,
+
+            "Giveaway Ping"
+
+        )
+
+
+    # ========================================================
+    # EVENTS
+    # ========================================================
+
+    @discord.ui.button(
+
+        label="Events Ping",
+        emoji="📅",
+        style=discord.ButtonStyle.secondary,
+        custom_id="notification_events"
+
+    )
+
+    async def events(
+
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+
+    ):
+
+        await self.toggle_role(
+
+            interaction,
+
+            EVENTS_ROLE_ID,
+
+            "Events Ping"
+
+        )
+
+
+# ============================================================
+# $ROLES COMMAND
+# ============================================================
+
+@bot.command()
+async def roles(ctx):
+
+    embed = discord.Embed(
+
+        title="Elite Stock Notification Roles",
+
+        description=(
+
+            "Choose the notifications you want to receive.\n"
+            "Click a button again to remove the role.\n\n"
+
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+
+            "📦 **Restock Ping**\n"
+            "> Get notified when new stock is available.\n\n"
+
+            "🎁 **Giveaway Ping**\n"
+            "> Get notified about new giveaways.\n\n"
+
+            "📅 **Events Ping**\n"
+            "> Get notified about upcoming events.\n\n"
+
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+
+            "**Click a button below to toggle your role.**"
+
+        ),
+
+        color=EMBED_COLOR
+
+    )
+
+    embed.set_footer(
+        text="Elite Stock • Notification Roles"
+    )
+
+    await ctx.send(
+
+        embed=embed,
+
+        view=NotificationRolesView()
+
+    )
 
 
 # ============================================================
@@ -1758,6 +2027,10 @@ async def on_ready():
         TicketControlsView()
     )
 
+    bot.add_view(
+        NotificationRolesView()
+    )
+
     print(
         f"Logged in as {bot.user}"
     )
@@ -1770,10 +2043,7 @@ async def on_ready():
 if not TOKEN:
 
     raise RuntimeError(
-
-        "DISCORD_TOKEN environment "
-        "variable is missing."
-
+        "DISCORD_TOKEN environment variable is missing."
     )
 
 
