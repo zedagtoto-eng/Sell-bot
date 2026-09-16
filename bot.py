@@ -2334,6 +2334,22 @@ async def on_ready():
             )
         )
 
+      @bot.command(name="removeproduct")
+@commands.has_permissions(administrator=True)
+async def removeproduct_command(ctx, product_id: str):
+    products = load_json(PRODUCTS_FILE, {})
+
+    if product_id not in products:
+        return await ctx.send(f"❌ Product `{product_id}` doesn't exist.")
+
+    product_name = products[product_id].get("name", product_id)
+
+    del products[product_id]
+    save_json(PRODUCTS_FILE, products)
+
+    await ctx.send(
+        f"🗑️ Removed product **{product_name}** (`{product_id}`) successfully."
+    )
 
 # ============================================================
 # START
