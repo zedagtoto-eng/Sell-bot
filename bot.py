@@ -1,13 +1,13 @@
 import os
 import json
-import time
 import asyncio
-import secrets
-from decimal import Decimal, ROUND_DOWN
+import random
+import string
+from decimal import Decimal, ROUND_HALF_UP
 
 import aiohttp
 import discord
-from discord.ext import commands, tasks
+from discord.ext import commands
 
 
 # ============================================================
@@ -16,50 +16,55 @@ from discord.ext import commands, tasks
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 
-# YOUR LTC RECEIVING ADDRESS
-LTC_ADDRESS = os.getenv(
-    "LTC_ADDRESS",
-    "LL8EdfmaSujikXjyM8Z9vieREQ57nV8YvJ"
-)
+# ============================================================
+# PUT YOUR LTC ADDRESS HERE
+# ============================================================
 
-# Discord IDs
-AUTOBUY_PANEL_CHANNEL_ID = int(
-    os.getenv("AUTOBUY_PANEL_CHANNEL_ID", "0")
-)
-
-BUY_TICKET_CATEGORY_ID = int(
-    os.getenv("BUY_TICKET_CATEGORY_ID", "0")
-)
-
-STAFF_ROLE_ID = int(
-    os.getenv("STAFF_ROLE_ID", "0")
-)
-
-LOG_CHANNEL_ID = int(
-    os.getenv("LOG_CHANNEL_ID", "0")
-)
-
-# Payment settings
-REQUIRED_CONFIRMATIONS = int(
-    os.getenv("REQUIRED_CONFIRMATIONS", "1")
-)
-
-PAYMENT_CHECK_SECONDS = 10
-
-ORDER_EXPIRY_SECONDS = 30 * 60
-
-# Litecoin Space API
-LTC_API = "https://litecoinspace.org/api"
-
-# Railway persistent storage
-DATA_DIR = "/app/data"
-
-PRODUCTS_FILE = f"{DATA_DIR}/products.json"
-ORDERS_FILE = f"{DATA_DIR}/orders.json"
-
+LTC_ADDRESS = "LL8EdfmaSujikXjyM8Z9vieREQ57nV8YvJ"
 
 # ============================================================
-# DISCORD
+# DISCORD IDS
+# ============================================================
+
+AUTOBUY_PANEL_CHANNEL_ID = 1547960767821779094
+BUY_TICKET_CATEGORY_ID = 1549730305361973310
+STAFF_ROLE_ID = 1546208356610605286
+LOG_CHANNEL_ID = 0
+
+# How many confirmations are required
+REQUIRED_CONFIRMATIONS = 1
+
+# How often payments are checked
+PAYMENT_CHECK_INTERVAL = 10
+
+# ============================================================
+# RAILWAY STORAGE
+# ============================================================
+
+DATA_DIR = "/app/data"
+
+PRODUCTS_FILE = os.path.join(
+    DATA_DIR,
+    "products.json"
+)
+
+ORDERS_FILE = os.path.join(
+    DATA_DIR,
+    "orders.json"
+)
+
+# ============================================================
+# COLORS
+# ============================================================
+
+EMBED_COLOR = discord.Color.from_rgb(
+    217,
+    232,
+    74
+)
+
+# ============================================================
+# BOT
 # ============================================================
 
 intents = discord.Intents.default()
@@ -72,437 +77,230 @@ bot = commands.Bot(
     help_command=None
 )
 
-
 # ============================================================
-# STORAGE
+# DATA FUNCTIONS
 # ============================================================
 
-def ensure_data_dir():
-    os.makedirs(DATA_DIR, exist_ok=True)
+def ensure_data():
+
+    os.makedirs(
+        DATA_DIR,
+        exist_ok=True
+    )
+
+    if not os.path.exists(PRODUCTS_FILE):
+
+        with open(
+            PRODUCTS_FILE,
+            "w",
+            encoding="utf-8"
+        ) as f:
+
+            json.dump(
+                {},
+                f,
+                indent=4
+            )
+
+    if not os.path.exists(ORDERS_FILE):
+
+        with open(
+            ORDERS_FILE,
+            "w",
+            encoding="utf-8"
+        ) as f:
+
+            json.dump(
+                {},
+                f,
+                indent=4
+            )
 
 
-def load_json(path, default):
-    ensure_data_dir()
+def load_products():
 
-    if not os.path.exists(path):
-        save_json(path, default)
-        return default
+    ensure_data()
 
     try:
-        with open(path, "r", encoding="utf-8") as f:
+
+        with open(
+            PRODUCTS_FILE,
+            "r",
+            encoding="utf-8"
+        ) as f:
+
             return json.load(f)
 
-    except Exception as e:
-        print(f"JSON LOAD ERROR {path}: {e}")
-        return default
+    except Exception:
+
+        return {}
 
 
-def save_json(path, data):
-    ensure_data_dir()
+def save_products(data):
 
-    temp = path + ".tmp"
+    ensure_data()
 
-    with open(temp, "w", encoding="utf-8") as f:
+    temp_file = PRODUCTS_FILE + ".tmp"
+
+    with open(
+        temp_file,
+        "w",
+        encoding="utf-8"
+    ) as f:
+
         json.dump(
             data,
             f,
-            indent=4,
-            ensure_ascii=False
+            indent=4
         )
 
-    os.replace(temp, path)
-
-
-products = load_json(
-    PRODUCTS_FILE,
-    {
-        "example_product": {
-            "name": "Example Product",
-            "emoji": "📦",
-            "price_usd": "1.00",
-            "min_quantity": 1,
-            "max_quantity": 100,
-            "stock": []
-        }
-    }
-)
-
-orders = load_json(
-    ORDERS_FILE,
-    {}
-)
-
-
-# ============================================================
-# DECIMAL HELPERS
-# ============================================================
-
-def ltc8(value):
-    return Decimal(str(value)).quantize(
-        Decimal("0.00000001"),
-        rounding=ROUND_DOWN
+    os.replace(
+        temp_file,
+        PRODUCTS_FILE
     )
 
 
-def usd8(value):
-    return Decimal(str(value)).quantize(
-        Decimal("0.00000001"),
-        rounding=ROUND_DOWN
-    )
+def load_orders():
 
-
-# ============================================================
-# HTTP
-# ============================================================
-
-async def api_get(endpoint):
-    url = LTC_API + endpoint
-
-    timeout = aiohttp.ClientTimeout(
-        total=15
-    )
+    ensure_data()
 
     try:
-        async with aiohttp.ClientSession(
-            timeout=timeout
-        ) as session:
 
-            async with session.get(url) as response:
+        with open(
+            ORDERS_FILE,
+            "r",
+            encoding="utf-8"
+        ) as f:
 
-                if response.status != 200:
-                    text = await response.text()
-
-                    print(
-                        f"LTC API ERROR "
-                        f"{response.status}: "
-                        f"{text[:300]}"
-                    )
-
-                    return None
-
-                return await response.json()
-
-    except Exception as e:
-
-        print(
-            "LTC API CONNECTION ERROR:",
-            e
-        )
-
-        return None
-
-
-# ============================================================
-# LTC ADDRESS VALIDATION
-# ============================================================
-
-async def validate_ltc_address():
-
-    if LTC_ADDRESS == "PUT_YOUR_LTC_ADDRESS_HERE":
-        print(
-            "WARNING: LTC_ADDRESS has not been configured."
-        )
-        return False
-
-    data = await api_get(
-        f"/v1/validate-address/{LTC_ADDRESS}"
-    )
-
-    if not data:
-        print(
-            "Could not validate LTC address."
-        )
-        return False
-
-    valid = data.get(
-        "isvalid",
-        False
-    )
-
-    if not valid:
-        print(
-            "WARNING: LTC_ADDRESS appears invalid."
-        )
-        return False
-
-    print(
-        "LTC address validated successfully."
-    )
-
-    return True
-
-
-# ============================================================
-# LTC PRICE
-# ============================================================
-
-async def get_ltc_usd_price():
-
-    data = await api_get(
-        "/v1/prices"
-    )
-
-    if not data:
-        return None
-
-    price = data.get(
-        "USD"
-    )
-
-    if price is None:
-        return None
-
-    try:
-        return Decimal(
-            str(price)
-        )
+            return json.load(f)
 
     except Exception:
-        return None
+
+        return {}
+
+
+def save_orders(data):
+
+    ensure_data()
+
+    temp_file = ORDERS_FILE + ".tmp"
+
+    with open(
+        temp_file,
+        "w",
+        encoding="utf-8"
+    ) as f:
+
+        json.dump(
+            data,
+            f,
+            indent=4
+        )
+
+    os.replace(
+        temp_file,
+        ORDERS_FILE
+    )
 
 
 # ============================================================
-# LTC TRANSACTION HELPERS
+# HELPERS
 # ============================================================
 
-def tx_received_amount(tx):
-    """
-    Returns total LTC sent TO LTC_ADDRESS.
+def money(value):
 
-    Litecoin Space returns output values in litoshis.
-    1 LTC = 100,000,000 litoshis.
-    """
+    return f"${float(value):.2f}"
 
-    total_litoshis = 0
 
-    for output in tx.get(
-        "vout",
-        []
-    ):
+def random_order_id():
 
-        if not isinstance(
-            output,
-            dict
-        ):
-            continue
-
-        script = output.get(
-            "scriptpubkey",
-            {}
-        )
-
-        if not isinstance(
-            script,
-            dict
-        ):
-            continue
-
-        destination = script.get(
-            "scriptpubkey_address"
-        )
-
-        if destination != LTC_ADDRESS:
-            continue
-
-        value = output.get(
-            "value",
-            0
-        )
-
-        try:
-            total_litoshis += int(
-                value
+    return (
+        "AB-"
+        + "".join(
+            random.choices(
+                string.ascii_uppercase
+                + string.digits,
+                k=8
             )
-
-        except Exception:
-            continue
-
-    return ltc8(
-        Decimal(total_litoshis)
-        / Decimal(100_000_000)
+        )
     )
 
 
-def tx_confirmed(tx):
+def get_staff_role(guild):
 
-    status = tx.get(
-        "status",
-        {}
+    if not STAFF_ROLE_ID:
+        return None
+
+    return guild.get_role(
+        STAFF_ROLE_ID
     )
 
-    if not isinstance(
-        status,
-        dict
-    ):
+
+def is_staff(member):
+
+    if member.guild.owner_id == member.id:
+        return True
+
+    role = get_staff_role(
+        member.guild
+    )
+
+    if not role:
         return False
 
-    return bool(
-        status.get(
-            "confirmed",
-            False
-        )
-    )
+    return role in member.roles
 
 
-def tx_confirmations(
-    tx,
-    tip_height
+def ticket_overwrites(
+    guild,
+    user
 ):
 
-    status = tx.get(
-        "status",
-        {}
+    overwrites = {
+
+        guild.default_role:
+            discord.PermissionOverwrite(
+                view_channel=False
+            ),
+
+        user:
+            discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True
+            )
+    }
+
+    staff = get_staff_role(
+        guild
     )
 
-    if not isinstance(
-        status,
-        dict
-    ):
-        return 0
+    if staff:
 
-    if not status.get(
-        "confirmed",
-        False
-    ):
-        return 0
-
-    block_height = status.get(
-        "block_height"
-    )
-
-    if block_height is None:
-        return 0
-
-    try:
-
-        confirmations = (
-            int(tip_height)
-            - int(block_height)
-            + 1
+        overwrites[staff] = (
+            discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True
+            )
         )
 
-        return max(
-            0,
-            confirmations
-        )
-
-    except Exception:
-        return 0
-
-
-# ============================================================
-# GET PENDING TRANSACTIONS
-# ============================================================
-
-async def get_pending_transactions():
-
-    data = await api_get(
-        f"/address/{LTC_ADDRESS}/txs/mempool"
-    )
-
-    if not isinstance(
-        data,
-        list
-    ):
-        return []
-
-    return data
-
-
-# ============================================================
-# GET ADDRESS TRANSACTIONS
-# ============================================================
-
-async def get_address_transactions():
-
-    data = await api_get(
-        f"/address/{LTC_ADDRESS}/txs"
-    )
-
-    if not isinstance(
-        data,
-        list
-    ):
-        return []
-
-    return data
-
-
-# ============================================================
-# GET TX
-# ============================================================
-
-async def get_transaction(
-    txid
-):
-
-    data = await api_get(
-        f"/tx/{txid}"
-    )
-
-    if not isinstance(
-        data,
-        dict
-    ):
-        return None
-
-    return data
-
-
-# ============================================================
-# BLOCK TIP
-# ============================================================
-
-async def get_tip_height():
-
-    data = await api_get(
-        "/blocks/tip/height"
-    )
-
-    if data is None:
-        return None
-
-    try:
-        return int(data)
-
-    except Exception:
-        return None
-
-
-# ============================================================
-# CHANNEL HELPERS
-# ============================================================
-
-async def get_channel(channel_id):
-
-    if not channel_id:
-        return None
-
-    channel = bot.get_channel(
-        int(channel_id)
-    )
-
-    if channel:
-        return channel
-
-    try:
-        return await bot.fetch_channel(
-            int(channel_id)
-        )
-
-    except Exception:
-        return None
+    return overwrites
 
 
 async def send_log(message):
 
-    channel = await get_channel(
+    if not LOG_CHANNEL_ID:
+        return
+
+    channel = bot.get_channel(
         LOG_CHANNEL_ID
     )
 
     if channel:
 
         try:
+
             await channel.send(
                 message
             )
@@ -512,241 +310,334 @@ async def send_log(message):
 
 
 # ============================================================
-# PAYMENT INVOICE EMBED
+# LITECOIN API
 # ============================================================
 
-def invoice_embed(
-    order
+LTC_API = "https://litecoinspace.org/api"
+
+
+async def api_get(path):
+
+    url = LTC_API + path
+
+    timeout = aiohttp.ClientTimeout(
+        total=15
+    )
+
+    async with aiohttp.ClientSession(
+        timeout=timeout
+    ) as session:
+
+        async with session.get(
+            url
+        ) as response:
+
+            if response.status != 200:
+                return None
+
+            return await response.json()
+
+
+async def get_ltc_price():
+
+    data = await api_get(
+        "/v1/prices"
+    )
+
+    if not data:
+        return None
+
+    if isinstance(data, dict):
+
+        for key in (
+            "USD",
+            "usd",
+            "price"
+        ):
+
+            if key in data:
+
+                try:
+
+                    return float(
+                        data[key]
+                    )
+
+                except Exception:
+                    pass
+
+    return None
+
+
+async def get_mempool_transactions():
+
+    if not LTC_ADDRESS:
+        return []
+
+    data = await api_get(
+        f"/address/{LTC_ADDRESS}/txs/mempool"
+    )
+
+    if isinstance(data, list):
+        return data
+
+    return []
+
+
+async def get_confirmed_transactions():
+
+    if not LTC_ADDRESS:
+        return []
+
+    data = await api_get(
+        f"/address/{LTC_ADDRESS}/txs"
+    )
+
+    if isinstance(data, list):
+        return data
+
+    return []
+
+
+async def get_transaction(txid):
+
+    data = await api_get(
+        f"/tx/{txid}"
+    )
+
+    if isinstance(data, dict):
+        return data
+
+    return None
+
+
+async def get_tip_height():
+
+    data = await api_get(
+        "/blocks/tip/height"
+    )
+
+    try:
+
+        return int(data)
+
+    except Exception:
+
+        return None
+
+
+def amount_sent_to_address(tx):
+
+    if not tx:
+        return Decimal("0")
+
+    total_litoshi = 0
+
+    for output in tx.get(
+        "vout",
+        []
+    ):
+
+        address = output.get(
+            "scriptpubkey_address"
+        )
+
+        if address == LTC_ADDRESS:
+
+            value = output.get(
+                "value",
+                0
+            )
+
+            try:
+
+                total_litoshi += int(
+                    value
+                )
+
+            except Exception:
+                pass
+
+    return (
+        Decimal(total_litoshi)
+        / Decimal(100_000_000)
+    )
+
+
+def tx_is_confirmed(tx):
+
+    status = tx.get(
+        "status",
+        {}
+    )
+
+    return bool(
+        status.get(
+            "confirmed",
+            False
+        )
+    )
+
+
+async def transaction_confirmations(tx):
+
+    if not tx_is_confirmed(tx):
+        return 0
+
+    status = tx.get(
+        "status",
+        {}
+    )
+
+    block_height = status.get(
+        "block_height"
+    )
+
+    if not block_height:
+        return 0
+
+    tip = await get_tip_height()
+
+    if tip is None:
+        return 0
+
+    return max(
+        0,
+        tip - int(block_height) + 1
+    )
+
+
+# ============================================================
+# PRODUCT FUNCTIONS
+# ============================================================
+
+def get_product(
+    product_id
 ):
+
+    products = load_products()
+
+    return products.get(
+        product_id
+    )
+
+
+def stock_count(
+    product_id
+):
+
+    product = get_product(
+        product_id
+    )
+
+    if not product:
+        return 0
+
+    return len(
+        product.get(
+            "stock",
+            []
+        )
+    )
+
+
+# ============================================================
+# INVOICE EMBED
+# ============================================================
+
+def build_invoice_embed(
+    order,
+    ltc_price
+):
+
+    required_ltc = Decimal(
+        str(
+            order["required_ltc"]
+        )
+    )
+
+    usd_total = Decimal(
+        str(
+            order["usd_total"]
+        )
+    )
 
     embed = discord.Embed(
         title="💸 Payment Invoice",
-        description=(
-            "Please complete the payment using "
-            "the details below.\n\n"
-            "Once the payment is confirmed, "
-            "your product will be delivered automatically."
+        color=EMBED_COLOR
+    )
+
+    embed.add_field(
+        name="🪙 Litecoin Address",
+        value=(
+            f"```{LTC_ADDRESS}```"
         ),
-        color=discord.Color.blue()
-    )
-
-    embed.add_field(
-        name="🌐 LTC Wallet Address",
-        value=f"`{LTC_ADDRESS}`",
         inline=False
     )
 
     embed.add_field(
-        name="💰 Amount to Pay (LTC)",
-        value=f"`{order['ltc_required']} LTC`",
-        inline=False
+        name="💰 Amount Required",
+        value=(
+            f"**{required_ltc:.8f} LTC**"
+        ),
+        inline=True
     )
 
     embed.add_field(
-        name="💵 Equivalent in USD",
-        value=f"${order['total_usd']}",
-        inline=False
+        name="💵 USD Equivalent",
+        value=(
+            f"**{money(usd_total)}**"
+        ),
+        inline=True
+    )
+
+    embed.add_field(
+        name="📦 Product",
+        value=order[
+            "product_name"
+        ],
+        inline=True
+    )
+
+    embed.add_field(
+        name="🔢 Quantity",
+        value=str(
+            order["quantity"]
+        ),
+        inline=True
+    )
+
+    embed.add_field(
+        name="🆔 Order",
+        value=f"`{order['id']}`",
+        inline=True
     )
 
     embed.add_field(
         name="⚠️ Important",
         value=(
-            "Send the exact amount shown above.\n\n"
-            "Payments are irreversible.\n\n"
-            "Your payment will first appear as "
-            "**TRANSACTION DETECTED** while pending."
+            "Send the **exact LTC amount** "
+            "shown above.\n"
+            "Do not send another cryptocurrency.\n"
+            "Automatic delivery happens after "
+            f"**{REQUIRED_CONFIRMATIONS} "
+            "confirmation(s)**."
         ),
         inline=False
+    )
+
+    embed.set_footer(
+        text="AutoBuy • Payment Monitoring"
     )
 
     return embed
 
 
 # ============================================================
-# DETECTED EMBED
+# INVOICE BUTTONS
 # ============================================================
 
-def detected_embed(
-    order
-):
-
-    embed = discord.Embed(
-        title="🔵 TRANSACTION DETECTED",
-        description=(
-            "Your LTC transaction has been detected "
-            "on the network.\n\n"
-            "The transaction is currently pending. "
-            "Your items will **not** be delivered "
-            "until the required confirmation is reached."
-        ),
-        color=discord.Color.blue()
-    )
-
-    embed.add_field(
-        name="🔗 Transaction",
-        value=f"`{order['txid']}`",
-        inline=False
-    )
-
-    embed.add_field(
-        name="💰 Amount Received",
-        value=f"`{order['received_ltc']} LTC`",
-        inline=True
-    )
-
-    embed.add_field(
-        name="⏳ Confirmations",
-        value=(
-            f"`{order.get('confirmations', 0)}`"
-            f" / `{REQUIRED_CONFIRMATIONS}`"
-        ),
-        inline=True
-    )
-
-    return embed
-
-
-# ============================================================
-# CONFIRMED EMBED
-# ============================================================
-
-def confirmed_embed(
-    order
-):
-
-    embed = discord.Embed(
-        title="🟢 PAYMENT CONFIRMED",
-        description=(
-            "Your LTC payment has been confirmed.\n\n"
-            "🎁 Your order is now being delivered."
-        ),
-        color=discord.Color.green()
-    )
-
-    embed.add_field(
-        name="🔗 Transaction",
-        value=f"`{order['txid']}`",
-        inline=False
-    )
-
-    embed.add_field(
-        name="💰 Paid",
-        value=f"`{order['received_ltc']} LTC`",
-        inline=True
-    )
-
-    embed.add_field(
-        name="✅ Confirmations",
-        value=f"`{order['confirmations']}`",
-        inline=True
-    )
-
-    return embed
-
-
-# ============================================================
-# UNDERPAYMENT EMBED
-# ============================================================
-
-def underpayment_embed(
-    order
-):
-
-    required = Decimal(
-        str(order["ltc_required"])
-    )
-
-    received = Decimal(
-        str(order["received_ltc"])
-    )
-
-    remaining = ltc8(
-        required - received
-    )
-
-    embed = discord.Embed(
-        title="⚠️ INCORRECT PAYMENT",
-        description=(
-            "A transaction was detected, but the "
-            "amount received is below the required amount.\n\n"
-            "**Your order has NOT been delivered.**"
-        ),
-        color=discord.Color.orange()
-    )
-
-    embed.add_field(
-        name="Required",
-        value=f"`{required} LTC`",
-        inline=True
-    )
-
-    embed.add_field(
-        name="Received",
-        value=f"`{received} LTC`",
-        inline=True
-    )
-
-    embed.add_field(
-        name="Remaining",
-        value=f"`{remaining} LTC`",
-        inline=False
-    )
-
-    embed.add_field(
-        name="Transaction",
-        value=f"`{order['txid']}`",
-        inline=False
-    )
-
-    return embed
-
-
-# ============================================================
-# OVERPAYMENT EMBED
-# ============================================================
-
-def overpayment_embed(
-    order
-):
-
-    embed = discord.Embed(
-        title="⚠️ OVERPAYMENT",
-        description=(
-            "A payment greater than the invoice "
-            "amount was detected.\n\n"
-            "The order has **NOT** been automatically "
-            "delivered.\n\n"
-            "Please contact staff."
-        ),
-        color=discord.Color.orange()
-    )
-
-    embed.add_field(
-        name="Required",
-        value=f"`{order['ltc_required']} LTC`",
-        inline=True
-    )
-
-    embed.add_field(
-        name="Received",
-        value=f"`{order['received_ltc']} LTC`",
-        inline=True
-    )
-
-    embed.add_field(
-        name="Transaction",
-        value=f"`{order['txid']}`",
-        inline=False
-    )
-
-    return embed
-
-
-# ============================================================
-# PAYMENT BUTTONS
-# ============================================================
-
-class PaymentView(
+class InvoiceButtons(
     discord.ui.View
 ):
 
@@ -762,15 +653,18 @@ class PaymentView(
         self.order_id = order_id
 
     @discord.ui.button(
-        label="📜 Paste Details",
-        style=discord.ButtonStyle.primary,
-        custom_id="autobuy_paste"
+        label="Paste Details",
+        emoji="📜",
+        style=discord.ButtonStyle.secondary,
+        custom_id="autobuy_paste_details"
     )
     async def paste_details(
         self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
+        interaction,
+        button
     ):
+
+        orders = load_orders()
 
         order = orders.get(
             self.order_id
@@ -784,25 +678,29 @@ class PaymentView(
 
         await interaction.response.send_message(
             (
-                "**LTC Payment Details**\n\n"
-                "🌐 Address:\n"
-                f"`{LTC_ADDRESS}`\n\n"
-                "💰 Amount:\n"
-                f"`{order['ltc_required']} LTC`"
+                "```text\n"
+                f"LTC Address:\n"
+                f"{LTC_ADDRESS}\n\n"
+                f"Amount:\n"
+                f"{order['required_ltc']:.8f} LTC\n"
+                "```"
             ),
             ephemeral=True
         )
 
     @discord.ui.button(
-        label="📷 Show QR Code",
-        style=discord.ButtonStyle.success,
-        custom_id="autobuy_qr"
+        label="Show QR Code",
+        emoji="📷",
+        style=discord.ButtonStyle.primary,
+        custom_id="autobuy_qr_code"
     )
     async def show_qr(
         self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
+        interaction,
+        button
     ):
+
+        orders = load_orders()
 
         order = orders.get(
             self.order_id
@@ -816,579 +714,103 @@ class PaymentView(
 
         uri = (
             f"litecoin:{LTC_ADDRESS}"
-            f"?amount={order['ltc_required']}"
+            f"?amount="
+            f"{order['required_ltc']:.8f}"
         )
 
         await interaction.response.send_message(
             (
-                "📷 **LTC Payment URI**\n\n"
-                f"`{uri}`\n\n"
-                "Your Litecoin wallet can use this "
-                "URI to generate the payment QR."
+                "📷 **Litecoin Payment URI**\n"
+                f"```{uri}```"
             ),
             ephemeral=True
         )
 
 
 # ============================================================
-# DELIVER STOCK
+# TICKET CONTROLS
 # ============================================================
 
-async def deliver_order(
-    order
+class TicketControls(
+    discord.ui.View
 ):
 
-    channel = await get_channel(
-        order["channel_id"]
-    )
-
-    if not channel:
-        return False
-
-    product = products.get(
-        order["product_id"]
-    )
-
-    if not product:
-        await channel.send(
-            "❌ Product no longer exists. Contact staff."
-        )
-        return False
-
-    quantity = int(
-        order["quantity"]
-    )
-
-    stock = product.get(
-        "stock",
-        []
-    )
-
-    if len(stock) < quantity:
-
-        await channel.send(
-            (
-                "⚠️ **PAYMENT CONFIRMED**\n\n"
-                "There is currently not enough stock "
-                "to fulfill your order.\n\n"
-                "Please contact staff."
-            )
-        )
-
-        await send_log(
-            f"⚠️ **OUT OF STOCK**\n"
-            f"Order: `{order['id']}`\n"
-            f"User: <@{order['user_id']}>\n"
-            f"Product: `{product['name']}`\n"
-            f"Quantity: `{quantity}`"
-        )
-
-        return False
-
-    delivered = stock[:quantity]
-
-    product["stock"] = stock[
-        quantity:
-    ]
-
-    save_json(
-        PRODUCTS_FILE,
-        products
-    )
-
-    order["status"] = "delivered"
-    order["delivered"] = True
-
-    orders[order["id"]] = order
-
-    save_json(
-        ORDERS_FILE,
-        orders
-    )
-
-    items = "\n".join(
-        f"`{item}`"
-        for item in delivered
-    )
-
-    embed = discord.Embed(
-        title="🎁 ORDER DELIVERED",
-        description=(
-            f"📦 **Product:** "
-            f"{product['name']}\n"
-            f"🔢 **Quantity:** "
-            f"{quantity}\n\n"
-            f"**Your items:**\n"
-            f"{items}"
-        ),
-        color=discord.Color.green()
-    )
-
-    await channel.send(
-        content=f"<@{order['user_id']}>",
-        embed=embed
-    )
-
-    await send_log(
-        f"🎁 **ORDER DELIVERED**\n"
-        f"Order: `{order['id']}`\n"
-        f"User: <@{order['user_id']}>\n"
-        f"Product: `{product['name']}`\n"
-        f"Quantity: `{quantity}`\n"
-        f"TX: `{order.get('txid', 'unknown')}`"
-    )
-
-    return True
-
-
-# ============================================================
-# FIND PAYMENT
-# ============================================================
-
-async def find_payment(
-    order
-):
-
-    # --------------------------------------------------------
-    # FIRST: MEMPOOL
-    # --------------------------------------------------------
-
-    pending = await get_pending_transactions()
-
-    for tx in pending:
-
-        txid = tx.get(
-            "txid"
-        )
-
-        if not txid:
-            continue
-
-        if txid in order.get(
-            "seen_txids",
-            []
-        ):
-            continue
-
-        amount = tx_received_amount(
-            tx
-        )
-
-        if amount <= 0:
-            continue
-
-        return {
-            "txid": txid,
-            "amount": amount,
-            "confirmed": False,
-            "confirmations": 0
-        }
-
-    # --------------------------------------------------------
-    # SECOND: CONFIRMED / ADDRESS HISTORY
-    # --------------------------------------------------------
-
-    transactions = await get_address_transactions()
-
-    for tx in transactions:
-
-        txid = tx.get(
-            "txid"
-        )
-
-        if not txid:
-            continue
-
-        if txid in order.get(
-            "seen_txids",
-            []
-        ):
-            # Still check an already-detected TX later
-            # through get_transaction().
-            if txid != order.get(
-                "txid"
-            ):
-                continue
-
-        amount = tx_received_amount(
-            tx
-        )
-
-        if amount <= 0:
-            continue
-
-        if tx_confirmed(tx):
-
-            tip = await get_tip_height()
-
-            confirmations = 0
-
-            if tip is not None:
-                confirmations = tx_confirmations(
-                    tx,
-                    tip
-                )
-
-            return {
-                "txid": txid,
-                "amount": amount,
-                "confirmed": True,
-                "confirmations": confirmations
-            }
-
-    return None
-
-
-# ============================================================
-# MONITOR EXISTING TRANSACTION
-# ============================================================
-
-async def update_existing_payment(
-    order
-):
-
-    txid = order.get(
-        "txid"
-    )
-
-    if not txid:
-        return None
-
-    tx = await get_transaction(
-        txid
-    )
-
-    if not tx:
-        return None
-
-    amount = tx_received_amount(
-        tx
-    )
-
-    if amount <= 0:
-        return None
-
-    tip = await get_tip_height()
-
-    confirmations = 0
-
-    if tip is not None:
-        confirmations = tx_confirmations(
-            tx,
-            tip
-        )
-
-    return {
-        "txid": txid,
-        "amount": amount,
-        "confirmed": tx_confirmed(tx),
-        "confirmations": confirmations
-    }
-
-
-# ============================================================
-# EDIT PAYMENT MESSAGE
-# ============================================================
-
-async def edit_payment_message(
-    order,
-    embed,
-    view=None
-):
-
-    channel = await get_channel(
-        order["channel_id"]
-    )
-
-    if not channel:
-        return
-
-    message_id = order.get(
-        "invoice_message_id"
-    )
-
-    if not message_id:
-        return
-
-    try:
-
-        message = await channel.fetch_message(
-            int(message_id)
-        )
-
-        await message.edit(
-            embed=embed,
-            view=view
-        )
-
-    except Exception as e:
-
-        print(
-            "MESSAGE EDIT ERROR:",
-            e
-        )
-
-
-# ============================================================
-# PAYMENT MONITOR
-# ============================================================
-
-@tasks.loop(
-    seconds=PAYMENT_CHECK_SECONDS
-)
-async def payment_monitor():
-
-    if not orders:
-        return
-
-    for order_id, order in list(
-        orders.items()
+    def __init__(
+        self,
+        order_id
     ):
+
+        super().__init__(
+            timeout=None
+        )
+
+        self.order_id = order_id
+
+    @discord.ui.button(
+        label="Close Ticket",
+        emoji="🔒",
+        style=discord.ButtonStyle.danger,
+        custom_id="autobuy_close_ticket"
+    )
+    async def close_ticket(
+        self,
+        interaction,
+        button
+    ):
+
+        orders = load_orders()
+
+        order = orders.get(
+            self.order_id
+        )
+
+        if not order:
+            return await interaction.response.send_message(
+                "❌ Order not found.",
+                ephemeral=True
+            )
+
+        if (
+            interaction.user.id
+            != order["user_id"]
+            and not is_staff(
+                interaction.user
+            )
+        ):
+
+            return await interaction.response.send_message(
+                "❌ You cannot close this ticket.",
+                ephemeral=True
+            )
+
+        order[
+            "status"
+        ] = "cancelled"
+
+        orders[
+            self.order_id
+        ] = order
+
+        save_orders(
+            orders
+        )
+
+        await interaction.response.send_message(
+            "🔒 Closing ticket..."
+        )
+
+        await asyncio.sleep(
+            2
+        )
 
         try:
 
-            status = order.get(
-                "status"
+            await interaction.channel.delete(
+                reason="AutoBuy ticket closed"
             )
 
-            if status in (
-                "delivered",
-                "overpaid",
-                "expired",
-                "cancelled"
-            ):
-                continue
-
-            # ------------------------------------------------
-            # EXPIRATION
-            # ------------------------------------------------
-
-            created_at = float(
-                order.get(
-                    "created_at",
-                    time.time()
-                )
-            )
-
-            if (
-                time.time() - created_at
-                > ORDER_EXPIRY_SECONDS
-            ):
-
-                order["status"] = "expired"
-
-                orders[order_id] = order
-
-                save_json(
-                    ORDERS_FILE,
-                    orders
-                )
-
-                continue
-
-            # ------------------------------------------------
-            # IF WE ALREADY KNOW TX, CHECK IT DIRECTLY
-            # ------------------------------------------------
-
-            if order.get("txid"):
-
-                payment = await update_existing_payment(
-                    order
-                )
-
-            else:
-
-                payment = await find_payment(
-                    order
-                )
-
-            if not payment:
-                continue
-
-            txid = payment["txid"]
-
-            amount = ltc8(
-                payment["amount"]
-            )
-
-            confirmations = int(
-                payment.get(
-                    "confirmations",
-                    0
-                )
-            )
-
-            required = ltc8(
-                order["ltc_required"]
-            )
-
-            # Save TX
-            order["txid"] = txid
-            order["received_ltc"] = str(
-                amount
-            )
-            order["confirmations"] = confirmations
-
-            seen = order.setdefault(
-                "seen_txids",
-                []
-            )
-
-            if txid not in seen:
-                seen.append(txid)
-
-            # ------------------------------------------------
-            # UNDERPAYMENT
-            # ------------------------------------------------
-
-            if amount < required:
-
-                order["status"] = "underpaid"
-
-                orders[order_id] = order
-
-                save_json(
-                    ORDERS_FILE,
-                    orders
-                )
-
-                await edit_payment_message(
-                    order,
-                    underpayment_embed(order),
-                    PaymentView(order_id)
-                )
-
-                continue
-
-            # ------------------------------------------------
-            # OVERPAYMENT
-            # ------------------------------------------------
-
-            if amount > required:
-
-                order["status"] = "overpaid"
-
-                orders[order_id] = order
-
-                save_json(
-                    ORDERS_FILE,
-                    orders
-                )
-
-                await edit_payment_message(
-                    order,
-                    overpayment_embed(order)
-                )
-
-                await send_log(
-                    f"⚠️ **OVERPAYMENT**\n"
-                    f"Order: `{order_id}`\n"
-                    f"User: <@{order['user_id']}>\n"
-                    f"Required: `{required} LTC`\n"
-                    f"Received: `{amount} LTC`\n"
-                    f"TX: `{txid}`"
-                )
-
-                continue
-
-            # ------------------------------------------------
-            # EXACT PAYMENT
-            # ------------------------------------------------
-
-            if not payment["confirmed"]:
-
-                if status != "detected":
-
-                    order["status"] = "detected"
-
-                    orders[order_id] = order
-
-                    save_json(
-                        ORDERS_FILE,
-                        orders
-                    )
-
-                    await edit_payment_message(
-                        order,
-                        detected_embed(order)
-                    )
-
-                    await send_log(
-                        f"🔵 **TRANSACTION DETECTED**\n"
-                        f"Order: `{order_id}`\n"
-                        f"User: <@{order['user_id']}>\n"
-                        f"Amount: `{amount} LTC`\n"
-                        f"TX: `{txid}`"
-                    )
-
-                continue
-
-            # ------------------------------------------------
-            # CONFIRMED BUT NOT ENOUGH CONFIRMATIONS
-            # ------------------------------------------------
-
-            if confirmations < REQUIRED_CONFIRMATIONS:
-
-                order["status"] = "detected"
-
-                orders[order_id] = order
-
-                save_json(
-                    ORDERS_FILE,
-                    orders
-                )
-
-                await edit_payment_message(
-                    order,
-                    detected_embed(order)
-                )
-
-                continue
-
-            # ------------------------------------------------
-            # FULLY CONFIRMED
-            # ------------------------------------------------
-
-            if order.get(
-                "status"
-            ) != "confirmed":
-
-                order["status"] = "confirmed"
-
-                orders[order_id] = order
-
-                save_json(
-                    ORDERS_FILE,
-                    orders
-                )
-
-                await edit_payment_message(
-                    order,
-                    confirmed_embed(order)
-                )
-
-                await send_log(
-                    f"🟢 **PAYMENT CONFIRMED**\n"
-                    f"Order: `{order_id}`\n"
-                    f"User: <@{order['user_id']}>\n"
-                    f"Amount: `{amount} LTC`\n"
-                    f"Confirmations: `{confirmations}`\n"
-                    f"TX: `{txid}`"
-                )
-
-                await asyncio.sleep(2)
-
-                await deliver_order(
-                    order
-                )
-
-        except Exception as e:
-
-            print(
-                f"PAYMENT MONITOR ERROR "
-                f"{order_id}:",
-                e
-            )
+        except Exception:
+            pass
 
 
 # ============================================================
@@ -1401,28 +823,34 @@ class ProductSelect(
 
     def __init__(self):
 
+        products = load_products()
+
         options = []
 
-        for product_id, product in products.items():
+        for product_id, product in list(
+            products.items()
+        )[:25]:
 
-            stock_count = len(
+            stock = len(
                 product.get(
                     "stock",
                     []
                 )
             )
 
+            if stock <= 0:
+                continue
+
             options.append(
                 discord.SelectOption(
-                    label=product["name"][:100],
+                    label=product.get(
+                        "name",
+                        product_id
+                    )[:100],
                     value=product_id,
-                    emoji=product.get(
-                        "emoji",
-                        "📦"
-                    ),
                     description=(
-                        f"${product['price_usd']} each "
-                        f"• Stock: {stock_count}"
+                        f"${product.get('price_usd', 0):.2f}"
+                        f" • {stock} stock"
                     )[:100]
                 )
             )
@@ -1437,13 +865,14 @@ class ProductSelect(
             )
 
         super().__init__(
-            placeholder="🛍️ Select a product...",
-            options=options[:25]
+            placeholder="🛒 Choose a product",
+            options=options,
+            custom_id="autobuy_product"
         )
 
     async def callback(
         self,
-        interaction: discord.Interaction
+        interaction
     ):
 
         product_id = self.values[0]
@@ -1451,81 +880,58 @@ class ProductSelect(
         if product_id == "none":
 
             return await interaction.response.send_message(
-                "❌ No products are currently available.",
+                "❌ No products are in stock.",
                 ephemeral=True
             )
 
-        product = products.get(
+        product = get_product(
             product_id
         )
 
         if not product:
 
             return await interaction.response.send_message(
-                "❌ Product not found.",
+                "❌ Product no longer exists.",
                 ephemeral=True
             )
 
-        stock_count = len(
+        stock = len(
             product.get(
                 "stock",
                 []
             )
         )
 
-        embed = discord.Embed(
-            title="✅ Product Ready",
-            color=discord.Color.from_rgb(
-                217,
-                232,
-                74
+        if stock <= 0:
+
+            return await interaction.response.send_message(
+                "❌ This product is out of stock.",
+                ephemeral=True
             )
-        )
-
-        embed.add_field(
-            name="📦 Product",
-            value=product["name"],
-            inline=False
-        )
-
-        embed.add_field(
-            name="💵 Price",
-            value=f"${product['price_usd']}",
-            inline=True
-        )
-
-        embed.add_field(
-            name="📦 Stock",
-            value=str(stock_count),
-            inline=True
-        )
-
-        embed.add_field(
-            name="🔢 Quantity",
-            value=(
-                f"{product['min_quantity']} - "
-                f"{product['max_quantity']}"
-            ),
-            inline=True
-        )
 
         await interaction.response.send_message(
-            embed=embed,
-            view=ProductReadyView(
+            (
+                f"📦 **{product['name']}**\n"
+                f"💵 Price: "
+                f"**${product['price_usd']:.2f}** each\n"
+                f"📊 Stock: **{stock}**\n\n"
+                "Choose your quantity:"
+            ),
+            view=QuantityView(
                 product_id
             ),
             ephemeral=True
         )
 
 
-class ProductSelectView(
+class ProductView(
     discord.ui.View
 ):
 
     def __init__(self):
 
         super().__init__(
-            timeout=300
+            timeout=120
         )
 
         self.add_item(
@@ -1534,11 +940,11 @@ class ProductSelectView(
 
 
 # ============================================================
-# PRODUCT READY
+# QUANTITY SELECT
 # ============================================================
 
-class ProductReadyView(
-    discord.ui.View
+class QuantitySelect(
+    discord.ui.Select
 ):
 
     def __init__(
@@ -1546,105 +952,10 @@ class ProductReadyView(
         product_id
     ):
 
-        super().__init__(
-            timeout=300
-        )
-
         self.product_id = product_id
 
-    @discord.ui.button(
-        label="🛒 Fill Purchase Details",
-        style=discord.ButtonStyle.success
-    )
-    async def purchase(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
-
-        await interaction.response.send_modal(
-            QuantityModal(
-                self.product_id
-            )
-        )
-
-    @discord.ui.button(
-        label="🔄 Change Product",
-        style=discord.ButtonStyle.primary
-    )
-    async def change(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
-
-        await interaction.response.send_message(
-            "🛍️ Select another product:",
-            view=ProductSelectView(),
-            ephemeral=True
-        )
-
-
-# ============================================================
-# QUANTITY MODAL
-# ============================================================
-
-class QuantityModal(
-    discord.ui.Modal,
-    title="🛒 Purchase Details"
-):
-
-    quantity = discord.ui.TextInput(
-        label="Quantity",
-        placeholder="Enter quantity",
-        required=True,
-        max_length=10
-    )
-
-    def __init__(
-        self,
-        product_id
-    ):
-
-        super().__init__()
-
-        self.product_id = product_id
-
-    async def on_submit(
-        self,
-        interaction: discord.Interaction
-    ):
-
-        product = products.get(
-            self.product_id
-        )
-
-        if not product:
-
-            return await interaction.response.send_message(
-                "❌ Product unavailable.",
-                ephemeral=True
-            )
-
-        try:
-
-            quantity = int(
-                self.quantity.value.strip()
-            )
-
-        except ValueError:
-
-            return await interaction.response.send_message(
-                "❌ Quantity must be a whole number.",
-                ephemeral=True
-            )
-
-        minimum = int(
-            product["min_quantity"]
-        )
-
-        maximum = int(
-            product["max_quantity"]
+        product = get_product(
+            product_id
         )
 
         stock = len(
@@ -1654,360 +965,370 @@ class QuantityModal(
             )
         )
 
-        if quantity < minimum:
-
-            return await interaction.response.send_message(
-                f"❌ Minimum quantity is **{minimum}**.",
-                ephemeral=True
-            )
-
-        if quantity > maximum:
-
-            return await interaction.response.send_message(
-                f"❌ Maximum quantity is **{maximum}**.",
-                ephemeral=True
-            )
-
-        if quantity > stock:
-
-            return await interaction.response.send_message(
-                (
-                    "❌ Not enough stock.\n\n"
-                    f"Available: **{stock}**\n"
-                    f"Requested: **{quantity}**"
-                ),
-                ephemeral=True
-            )
-
-        unit_price = Decimal(
-            str(product["price_usd"])
-        )
-
-        total_usd = usd8(
-            unit_price
-            * Decimal(quantity)
-        )
-
-        embed = discord.Embed(
-            title="🛒 Purchase Summary",
-            color=discord.Color.from_rgb(
-                217,
-                232,
-                74
+        max_quantity = min(
+            stock,
+            int(
+                product.get(
+                    "max_quantity",
+                    10
+                )
             )
         )
 
-        embed.add_field(
-            name="📦 Product",
-            value=product["name"],
-            inline=False
+        min_quantity = max(
+            1,
+            int(
+                product.get(
+                    "min_quantity",
+                    1
+                )
+            )
         )
 
-        embed.add_field(
-            name="🔢 Quantity",
-            value=str(quantity),
-            inline=True
+        if max_quantity < min_quantity:
+            max_quantity = min_quantity
+
+        options = []
+
+        for quantity in range(
+            min_quantity,
+            max_quantity + 1
+        ):
+
+            options.append(
+                discord.SelectOption(
+                    label=f"{quantity}x",
+                    value=str(
+                        quantity
+                    ),
+                    description=(
+                        f"Buy {quantity} item(s)"
+                    )
+                )
+            )
+
+        super().__init__(
+            placeholder="🔢 Choose quantity",
+            options=options[:25],
+            custom_id=(
+                f"autobuy_quantity_{product_id}"
+            )
         )
 
-        embed.add_field(
-            name="💵 Unit Price",
-            value=f"${unit_price}",
-            inline=True
+    async def callback(
+        self,
+        interaction
+    ):
+
+        quantity = int(
+            self.values[0]
         )
 
-        embed.add_field(
-            name="🧮 Total",
-            value=f"${total_usd}",
-            inline=True
-        )
-
-        await interaction.response.send_message(
-            embed=embed,
-            view=PurchaseSummaryView(
-                self.product_id,
-                quantity,
-                total_usd
-            ),
-            ephemeral=True
+        await create_order(
+            interaction,
+            self.product_id,
+            quantity
         )
 
 
-# ============================================================
-# PURCHASE SUMMARY
-# ============================================================
-
-class PurchaseSummaryView(
+class QuantityView(
     discord.ui.View
 ):
 
     def __init__(
         self,
-        product_id,
-        quantity,
-        total_usd
+        product_id
     ):
 
         super().__init__(
-            timeout=600
+            timeout=120
         )
 
-        self.product_id = product_id
-        self.quantity = quantity
-        self.total_usd = total_usd
-
-    @discord.ui.button(
-        label="🔢 Change Quantity",
-        style=discord.ButtonStyle.primary
-    )
-    async def change_quantity(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
-
-        await interaction.response.send_modal(
-            QuantityModal(
-                self.product_id
+        self.add_item(
+            QuantitySelect(
+                product_id
             )
         )
 
-    @discord.ui.button(
-        label="💸 Continue to Payment",
-        style=discord.ButtonStyle.success
-    )
-    async def pay(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
 
-        await interaction.response.defer(
+# ============================================================
+# CREATE TICKET
+# ============================================================
+
+async def create_order(
+    interaction,
+    product_id,
+    quantity
+):
+
+    product = get_product(
+        product_id
+    )
+
+    if not product:
+
+        return await interaction.response.send_message(
+            "❌ Product not found.",
             ephemeral=True
         )
 
-        # ----------------------------------------------------
-        # GET LTC PRICE
-        # ----------------------------------------------------
+    available = len(
+        product.get(
+            "stock",
+            []
+        )
+    )
 
-        ltc_price = await get_ltc_usd_price()
+    if quantity > available:
 
-        if not ltc_price:
-
-            return await interaction.followup.send(
-                (
-                    "❌ Couldn't retrieve the current "
-                    "LTC price. Try again shortly."
-                ),
-                ephemeral=True
-            )
-
-        # ----------------------------------------------------
-        # CALCULATE LTC
-        # ----------------------------------------------------
-
-        required_ltc = ltc8(
-            Decimal(str(self.total_usd))
-            / ltc_price
+        return await interaction.response.send_message(
+            f"❌ Only **{available}** stock available.",
+            ephemeral=True
         )
 
-        if required_ltc <= 0:
-
-            return await interaction.followup.send(
-                "❌ Invalid LTC amount.",
-                ephemeral=True
+    usd_total = (
+        Decimal(
+            str(
+                product["price_usd"]
             )
+        )
+        * Decimal(quantity)
+    ).quantize(
+        Decimal("0.01"),
+        rounding=ROUND_HALF_UP
+    )
 
-        guild = interaction.guild
+    ltc_price = await get_ltc_price()
 
-        if not guild:
+    if not ltc_price:
 
-            return await interaction.followup.send(
-                "❌ This can only be used in a server.",
-                ephemeral=True
-            )
-
-        # ----------------------------------------------------
-        # CATEGORY
-        # ----------------------------------------------------
-
-        category = None
-
-        if BUY_TICKET_CATEGORY_ID:
-
-            category = guild.get_channel(
-                BUY_TICKET_CATEGORY_ID
-            )
-
-        # ----------------------------------------------------
-        # PERMISSIONS
-        # ----------------------------------------------------
-
-        overwrites = {
-            guild.default_role:
-                discord.PermissionOverwrite(
-                    view_channel=False
-                ),
-
-            interaction.user:
-                discord.PermissionOverwrite(
-                    view_channel=True,
-                    send_messages=True,
-                    read_message_history=True
-                )
-        }
-
-        if STAFF_ROLE_ID:
-
-            staff_role = guild.get_role(
-                STAFF_ROLE_ID
-            )
-
-            if staff_role:
-
-                overwrites[staff_role] = (
-                    discord.PermissionOverwrite(
-                        view_channel=True,
-                        send_messages=True,
-                        read_message_history=True
-                    )
-                )
-
-        # ----------------------------------------------------
-        # ORDER ID
-        # ----------------------------------------------------
-
-        order_id = (
-            secrets.token_hex(6)
-            .upper()
+        return await interaction.response.send_message(
+            "❌ Couldn't get the current LTC price.",
+            ephemeral=True
         )
 
-        # ----------------------------------------------------
-        # CREATE CHANNEL
-        # ----------------------------------------------------
+    required_ltc = (
+        usd_total
+        / Decimal(
+            str(
+                ltc_price
+            )
+        )
+    ).quantize(
+        Decimal("0.00000001"),
+        rounding=ROUND_HALF_UP
+    )
+
+    guild = interaction.guild
+    user = interaction.user
+
+    category = None
+
+    if BUY_TICKET_CATEGORY_ID:
+
+        category = guild.get_channel(
+            BUY_TICKET_CATEGORY_ID
+        )
+
+    username = "".join(
+        character.lower()
+        if character.isalnum()
+        else "-"
+        for character in user.name
+    )
+
+    username = username[:20]
+
+    channel_name = (
+        f"autobuy-{username}"
+    )
+
+    overwrites = ticket_overwrites(
+        guild,
+        user
+    )
+
+    try:
 
         channel = await guild.create_text_channel(
-            f"buy-{order_id.lower()}",
+            channel_name,
             category=category,
             overwrites=overwrites,
-            reason="AutoBuy order"
+            reason="AutoBuy ticket"
         )
 
-        # ----------------------------------------------------
-        # ORDER
-        # ----------------------------------------------------
+    except discord.Forbidden:
 
-        order = {
-            "id": order_id,
-            "user_id": interaction.user.id,
-            "channel_id": channel.id,
+        return await interaction.response.send_message(
+            "❌ I don't have permission to create tickets.",
+            ephemeral=True
+        )
 
-            "product_id": self.product_id,
-            "quantity": self.quantity,
+    order_id = random_order_id()
 
-            "total_usd": str(
-                self.total_usd
+    order = {
+
+        "id": order_id,
+
+        "user_id":
+            user.id,
+
+        "guild_id":
+            guild.id,
+
+        "channel_id":
+            channel.id,
+
+        "product_id":
+            product_id,
+
+        "product_name":
+            product["name"],
+
+        "quantity":
+            quantity,
+
+        "unit_price_usd":
+            float(
+                product["price_usd"]
             ),
 
-            "ltc_price_usd": str(
-                ltc_price
+        "usd_total":
+            float(
+                usd_total
             ),
 
-            "ltc_required": str(
+        "required_ltc":
+            float(
                 required_ltc
             ),
 
-            "status": "waiting",
+        "status":
+            "waiting",
 
-            "created_at": time.time(),
+        "created_at":
+            discord.utils.utcnow().isoformat(),
 
-            "txid": None,
-            "received_ltc": None,
-            "confirmations": 0,
+        "detected_tx":
+            None,
 
-            "seen_txids": [],
+        "received_ltc":
+            0,
 
-            "delivered": False
-        }
+        "confirmations":
+            0,
 
-        orders[order_id] = order
+        "delivered":
+            False
+    }
 
-        save_json(
-            ORDERS_FILE,
-            orders
+    orders = load_orders()
+
+    orders[
+        order_id
+    ] = order
+
+    save_orders(
+        orders
+    )
+
+    await interaction.response.send_message(
+        (
+            "🎟️ **AutoBuy Ticket Created!**\n"
+            f"{channel.mention}"
+        ),
+        ephemeral=True
+    )
+
+    embed = discord.Embed(
+        title="🛒 AutoBuy Ticket",
+        description=(
+            f"Welcome {user.mention}!\n\n"
+            "Your order has been created."
+        ),
+        color=EMBED_COLOR
+    )
+
+    embed.add_field(
+        name="📦 Product",
+        value=product["name"],
+        inline=True
+    )
+
+    embed.add_field(
+        name="🔢 Quantity",
+        value=str(quantity),
+        inline=True
+    )
+
+    embed.add_field(
+        name="💵 Total",
+        value=money(usd_total),
+        inline=True
+    )
+
+    embed.add_field(
+        name="📊 Stock",
+        value=str(available),
+        inline=True
+    )
+
+    embed.add_field(
+        name="🆔 Order",
+        value=f"`{order_id}`",
+        inline=True
+    )
+
+    embed.set_footer(
+        text="AutoBuy • Ticket System"
+    )
+
+    await channel.send(
+        embed=embed
+    )
+
+    invoice = build_invoice_embed(
+        order,
+        ltc_price
+    )
+
+    await channel.send(
+        embed=invoice,
+        view=InvoiceButtons(
+            order_id
         )
+    )
 
-        # ----------------------------------------------------
-        # INVOICE
-        # ----------------------------------------------------
-
-        message = await channel.send(
-            content=(
-                f"<@{interaction.user.id}>"
-            ),
-            embed=invoice_embed(
-                order
-            ),
-            view=PaymentView(
-                order_id
-            )
+    await channel.send(
+        (
+            "🔎 **Payment monitoring started.**\n"
+            "Send the exact amount shown above."
         )
+    )
 
-        order["invoice_message_id"] = (
-            message.id
+    await channel.send(
+        view=TicketControls(
+            order_id
         )
+    )
 
-        orders[order_id] = order
-
-        save_json(
-            ORDERS_FILE,
-            orders
+    await send_log(
+        (
+            "🛒 **New AutoBuy Order**\n"
+            f"User: {user.mention}\n"
+            f"Product: {product['name']}\n"
+            f"Quantity: {quantity}\n"
+            f"Total: ${usd_total:.2f}\n"
+            f"Order: `{order_id}`"
         )
-
-        # ----------------------------------------------------
-        # ORDER INFORMATION
-        # ----------------------------------------------------
-
-        product = products[
-            self.product_id
-        ]
-
-        await channel.send(
-            (
-                "🛒 **AutoBuy Order Created**\n\n"
-                f"📦 Product: **{product['name']}**\n"
-                f"🔢 Quantity: **{self.quantity}**\n"
-                f"💵 Total: **${self.total_usd}**\n"
-                f"💰 LTC Required: **{required_ltc} LTC**\n\n"
-                "Waiting for payment..."
-            )
-        )
-
-        await send_log(
-            (
-                f"🛒 **NEW AUTOBUY ORDER**\n"
-                f"Order: `{order_id}`\n"
-                f"User: <@{interaction.user.id}>\n"
-                f"Product: `{product['name']}`\n"
-                f"Quantity: `{self.quantity}`\n"
-                f"USD: `${self.total_usd}`\n"
-                f"LTC: `{required_ltc}`"
-            )
-        )
-
-        await interaction.followup.send(
-            (
-                "✅ **Order created!**\n\n"
-                f"Go to {channel.mention}"
-            ),
-            ephemeral=True
-        )
+    )
 
 
 # ============================================================
 # PUBLIC AUTOBUY PANEL
 # ============================================================
 
-class AutoBuyPanelView(
+class AutoBuyPanel(
     discord.ui.View
 ):
 
@@ -2018,25 +1339,49 @@ class AutoBuyPanelView(
         )
 
     @discord.ui.button(
-        label="🛒 Open Auto Buy",
+        label="Open Auto Buy",
+        emoji="🎟️",
         style=discord.ButtonStyle.success,
-        custom_id="autobuy_open"
+        custom_id="autobuy_open_ticket"
     )
-    async def open_shop(
+    async def open_autobuy(
         self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
+        interaction,
+        button
     ):
 
+        products = load_products()
+
+        available = [
+            product
+            for product in products.values()
+            if len(
+                product.get(
+                    "stock",
+                    []
+                )
+            ) > 0
+        ]
+
+        if not available:
+
+            return await interaction.response.send_message(
+                "❌ AutoBuy is currently out of stock.",
+                ephemeral=True
+            )
+
         await interaction.response.send_message(
-            "🛍️ **Select what you want to buy:**",
-            view=ProductSelectView(),
+            (
+                "🛒 **AUTO BUY**\n\n"
+                "Select the product you want to purchase."
+            ),
+            view=ProductView(),
             ephemeral=True
         )
 
 
 # ============================================================
-# SEND PANEL
+# $AUTOBUY
 # ============================================================
 
 @bot.command(
@@ -2045,52 +1390,47 @@ class AutoBuyPanelView(
 @commands.has_permissions(
     administrator=True
 )
-async def autobuy(
+async def autobuy_command(
     ctx
 ):
 
     embed = discord.Embed(
         title="🛒 AUTO BUY",
         description=(
-            "Purchase your products automatically "
-            "using Litecoin.\n\n"
-            "Select your product, choose your quantity, "
-            "complete the LTC payment, and receive "
-            "your items automatically after confirmation."
+            "**Automatic Stock Delivery**\n\n"
+            "Click **🎟️ Open Auto Buy** below "
+            "to create your private purchase ticket.\n\n"
+            "📦 Select a product\n"
+            "🔢 Select quantity\n"
+            "💸 Pay with LTC\n"
+            "🔵 Payment detected\n"
+            "🟢 Payment confirmed\n"
+            "📦 Stock delivered automatically"
         ),
-        color=discord.Color.from_rgb(
-            217,
-            232,
-            74
-        )
+        color=EMBED_COLOR
     )
 
     embed.add_field(
-        name="⚡ Automatic",
-        value="Automatic payment detection",
-        inline=True
+        name="📊 Stock System",
+        value=(
+            "Products can hold up to **10+ stock items** "
+            "and stock is checked before every order."
+        ),
+        inline=False
     )
 
-    embed.add_field(
-        name="💰 LTC",
-        value="Litecoin payments",
-        inline=True
-    )
-
-    embed.add_field(
-        name="🎁 Delivery",
-        value="Automatic stock delivery",
-        inline=True
+    embed.set_footer(
+        text="AutoBuy • Private Ticket System"
     )
 
     await ctx.send(
         embed=embed,
-        view=AutoBuyPanelView()
+        view=AutoBuyPanel()
     )
 
 
 # ============================================================
-# ADD PRODUCT
+# $ADDPRODUCT
 # ============================================================
 
 @bot.command(
@@ -2102,12 +1442,32 @@ async def autobuy(
 async def addproduct(
     ctx,
     product_id: str,
-    price_usd: str,
+    price_usd: float,
     min_quantity: int,
     max_quantity: int,
     *,
     name: str
 ):
+
+    if price_usd <= 0:
+
+        return await ctx.send(
+            "❌ Price must be greater than $0."
+        )
+
+    if min_quantity < 1:
+
+        return await ctx.send(
+            "❌ Minimum quantity must be at least 1."
+        )
+
+    if max_quantity < min_quantity:
+
+        return await ctx.send(
+            "❌ Maximum quantity cannot be below minimum."
+        )
+
+    products = load_products()
 
     if product_id in products:
 
@@ -2115,40 +1475,45 @@ async def addproduct(
             "❌ Product already exists."
         )
 
-    try:
-        Decimal(price_usd)
+    products[
+        product_id
+    ] = {
 
-    except Exception:
+        "name":
+            name,
 
-        return await ctx.send(
-            "❌ Invalid price."
-        )
+        "price_usd":
+            price_usd,
 
-    products[product_id] = {
-        "name": name,
-        "emoji": "📦",
-        "price_usd": price_usd,
-        "min_quantity": min_quantity,
-        "max_quantity": max_quantity,
-        "stock": []
+        "min_quantity":
+            min_quantity,
+
+        "max_quantity":
+            max_quantity,
+
+        "stock":
+            []
     }
 
-    save_json(
-        PRODUCTS_FILE,
+    save_products(
         products
     )
 
     await ctx.send(
         (
-            f"✅ Product created:\n"
-            f"**{name}**\n"
-            f"ID: `{product_id}`"
+            "✅ **Product Created**\n\n"
+            f"📦 Product: **{name}**\n"
+            f"🆔 ID: `{product_id}`\n"
+            f"💵 Price: **${price_usd:.2f}**\n"
+            f"🔢 Quantity: "
+            f"**{min_quantity}-{max_quantity}**\n"
+            "📊 Stock: **0**"
         )
     )
 
 
 # ============================================================
-# ADD STOCK
+# $STOCK
 # ============================================================
 
 @bot.command(
@@ -2157,14 +1522,14 @@ async def addproduct(
 @commands.has_permissions(
     administrator=True
 )
-async def stock(
+async def stock_command(
     ctx,
     product_id: str,
     *,
     items: str
 ):
 
-    product = products.get(
+    product = get_product(
         product_id
     )
 
@@ -2183,33 +1548,43 @@ async def stock(
     if not new_items:
 
         return await ctx.send(
-            "❌ No stock supplied."
+            "❌ No stock items supplied."
         )
 
-    product.setdefault(
-        "stock",
-        []
-    ).extend(
+    products = load_products()
+
+    products[
+        product_id
+    ][
+        "stock"
+    ].extend(
         new_items
     )
 
-    save_json(
-        PRODUCTS_FILE,
+    save_products(
         products
+    )
+
+    total = len(
+        products[
+            product_id
+        ][
+            "stock"
+        ]
     )
 
     await ctx.send(
         (
             f"✅ Added **{len(new_items)}** "
-            f"items to **{product['name']}**.\n\n"
-            f"Current stock: "
-            f"**{len(product['stock'])}**"
+            f"stock item(s).\n"
+            f"📦 Product: **{product['name']}**\n"
+            f"📊 Total Stock: **{total}**"
         )
     )
 
 
 # ============================================================
-# STOCK COUNT
+# $STOCKCOUNT
 # ============================================================
 
 @bot.command(
@@ -2218,12 +1593,12 @@ async def stock(
 @commands.has_permissions(
     administrator=True
 )
-async def stockcount(
+async def stockcount_command(
     ctx,
     product_id: str
 ):
 
-    product = products.get(
+    product = get_product(
         product_id
     )
 
@@ -2233,56 +1608,682 @@ async def stockcount(
             "❌ Product not found."
         )
 
+    count = len(
+        product.get(
+            "stock",
+            []
+        )
+    )
+
     await ctx.send(
         (
             f"📦 **{product['name']}**\n"
-            f"Stock: **"
-            f"{len(product.get('stock', []))}"
-            f"**"
+            f"📊 Stock: **{count}**"
         )
     )
 
 
 # ============================================================
-# ORDER INFO
+# $PRODUCTS
 # ============================================================
 
 @bot.command(
-    name="order"
+    name="products"
+)
+async def products_command(
+    ctx
+):
+
+    products = load_products()
+
+    if not products:
+
+        return await ctx.send(
+            "❌ No products configured."
+        )
+
+    embed = discord.Embed(
+        title="📦 AutoBuy Products",
+        color=EMBED_COLOR
+    )
+
+    for product_id, product in products.items():
+
+        count = len(
+            product.get(
+                "stock",
+                []
+            )
+        )
+
+        embed.add_field(
+            name=product["name"],
+            value=(
+                f"ID: `{product_id}`\n"
+                f"Price: **${product['price_usd']:.2f}**\n"
+                f"Stock: **{count}**"
+            ),
+            inline=False
+        )
+
+    await ctx.send(
+        embed=embed
+    )
+
+
+# ============================================================
+# UPDATE TICKET
+# ============================================================
+
+async def update_ticket(
+    order,
+    title,
+    description
+):
+
+    channel = bot.get_channel(
+        int(
+            order["channel_id"]
+        )
+    )
+
+    if not channel:
+        return
+
+    embed = discord.Embed(
+        title=title,
+        description=description,
+        color=EMBED_COLOR
+    )
+
+    embed.set_footer(
+        text=f"Order {order['id']}"
+    )
+
+    try:
+
+        await channel.send(
+            embed=embed
+        )
+
+    except Exception:
+        pass
+
+
+# ============================================================
+# DELIVERY
+# ============================================================
+
+async def deliver_order(
+    order
+):
+
+    if order.get(
+        "delivered"
+    ):
+        return False
+
+    products = load_products()
+
+    product = products.get(
+        order["product_id"]
+    )
+
+    if not product:
+        return False
+
+    stock = product.get(
+        "stock",
+        []
+    )
+
+    quantity = int(
+        order["quantity"]
+    )
+
+    if len(stock) < quantity:
+
+        await update_ticket(
+            order,
+            "❌ DELIVERY FAILED",
+            (
+                "Payment was confirmed, but there "
+                "isn't enough stock available.\n\n"
+                "Staff review is required."
+            )
+        )
+
+        return False
+
+    items = stock[
+        :quantity
+    ]
+
+    product[
+        "stock"
+    ] = stock[
+        quantity:
+    ]
+
+    products[
+        order["product_id"]
+    ] = product
+
+    save_products(
+        products
+    )
+
+    orders = load_orders()
+
+    if order["id"] not in orders:
+        return False
+
+    # Prevent duplicate delivery
+    orders[
+        order["id"]
+    ][
+        "delivered"
+    ] = True
+
+    orders[
+        order["id"]
+    ][
+        "status"
+    ] = "delivered"
+
+    save_orders(
+        orders
+    )
+
+    channel = bot.get_channel(
+        int(
+            order["channel_id"]
+        )
+    )
+
+    if channel:
+
+        embed = discord.Embed(
+            title="📦 DELIVERY",
+            description=(
+                "Your payment has been confirmed "
+                "and your order has been delivered."
+            ),
+            color=EMBED_COLOR
+        )
+
+        await channel.send(
+            embed=embed
+        )
+
+        for number, item in enumerate(
+            items,
+            start=1
+        ):
+
+            await channel.send(
+                (
+                    f"**Item {number}**\n"
+                    f"```text\n"
+                    f"{item}\n"
+                    f"```"
+                )
+            )
+
+        await channel.send(
+            (
+                "🟢 **ORDER COMPLETE**\n"
+                "You can close this ticket."
+            ),
+            view=TicketControls(
+                order["id"]
+            )
+        )
+
+    await send_log(
+        (
+            "📦 **AutoBuy Delivered**\n"
+            f"Order: `{order['id']}`\n"
+            f"User: <@{order['user_id']}>\n"
+            f"Product: {order['product_name']}\n"
+            f"Quantity: {order['quantity']}"
+        )
+    )
+
+    return True
+
+
+# ============================================================
+# TRANSACTION PROCESSING
+# ============================================================
+
+async def inspect_transaction(
+    order,
+    tx
+):
+
+    if not tx:
+        return False
+
+    received = amount_sent_to_address(
+        tx
+    )
+
+    if received <= 0:
+        return False
+
+    required = Decimal(
+        str(
+            order["required_ltc"]
+        )
+    )
+
+    txid = tx.get(
+        "txid"
+    )
+
+    order[
+        "detected_tx"
+    ] = txid
+
+    order[
+        "received_ltc"
+    ] = float(
+        received
+    )
+
+    # --------------------------------------------------------
+    # OVERPAYMENT
+    # --------------------------------------------------------
+
+    if received > required:
+
+        order[
+            "status"
+        ] = "overpaid"
+
+        await update_ticket(
+            order,
+            "🟠 PAYMENT OVERPAID",
+            (
+                f"Required: **{required:.8f} LTC**\n"
+                f"Received: **{received:.8f} LTC**\n\n"
+                "Automatic delivery has been paused.\n"
+                "Staff review is required."
+            )
+        )
+
+        return True
+
+    # --------------------------------------------------------
+    # UNDERPAYMENT
+    # --------------------------------------------------------
+
+    if received < required:
+
+        remaining = (
+            required - received
+        )
+
+        order[
+            "status"
+        ] = "underpaid"
+
+        await update_ticket(
+            order,
+            "🟡 PAYMENT UNDERPAID",
+            (
+                f"Required: **{required:.8f} LTC**\n"
+                f"Received: **{received:.8f} LTC**\n"
+                f"Remaining: **{remaining:.8f} LTC**\n\n"
+                "No stock has been delivered."
+            )
+        )
+
+        return True
+
+    # --------------------------------------------------------
+    # PENDING TRANSACTION
+    # --------------------------------------------------------
+
+    if not tx_is_confirmed(tx):
+
+        order[
+            "status"
+        ] = "detected"
+
+        await update_ticket(
+            order,
+            "🔵 TRANSACTION DETECTED",
+            (
+                "A matching Litecoin transaction "
+                "was detected.\n\n"
+                f"**TX:** `{txid}`\n"
+                f"**Amount:** {received:.8f} LTC\n"
+                "**Confirmations:** 0\n\n"
+                "Waiting for blockchain confirmation."
+            )
+        )
+
+        return True
+
+    # --------------------------------------------------------
+    # CONFIRMATIONS
+    # --------------------------------------------------------
+
+    confirmations = (
+        await transaction_confirmations(
+            tx
+        )
+    )
+
+    order[
+        "confirmations"
+    ] = confirmations
+
+    if confirmations < REQUIRED_CONFIRMATIONS:
+
+        order[
+            "status"
+        ] = "detected"
+
+        await update_ticket(
+            order,
+            "🔵 TRANSACTION DETECTED",
+            (
+                f"**TX:** `{txid}`\n"
+                f"**Amount:** {received:.8f} LTC\n"
+                f"**Confirmations:** "
+                f"{confirmations}/"
+                f"{REQUIRED_CONFIRMATIONS}\n\n"
+                "Waiting for more confirmations."
+            )
+        )
+
+        return True
+
+    # --------------------------------------------------------
+    # CONFIRMED
+    # --------------------------------------------------------
+
+    order[
+        "status"
+    ] = "confirmed"
+
+    await update_ticket(
+        order,
+        "🟢 PAYMENT CONFIRMED",
+        (
+            f"**TX:** `{txid}`\n"
+            f"**Amount:** {received:.8f} LTC\n"
+            f"**Confirmations:** {confirmations}\n\n"
+            "Payment confirmed.\n"
+            "Delivering your stock..."
+        )
+    )
+
+    await deliver_order(
+        order
+    )
+
+    return True
+
+
+# ============================================================
+# CHECK ORDER
+# ============================================================
+
+async def check_order(
+    order
+):
+
+    if order.get(
+        "delivered"
+    ):
+        return
+
+    if order.get(
+        "status"
+    ) in (
+        "cancelled",
+        "expired",
+        "delivered",
+        "overpaid"
+    ):
+        return
+
+    # Check previously detected transaction
+    detected_tx = order.get(
+        "detected_tx"
+    )
+
+    if detected_tx:
+
+        tx = await get_transaction(
+            detected_tx
+        )
+
+        if tx:
+
+            await inspect_transaction(
+                order,
+                tx
+            )
+
+            return
+
+    # Check mempool
+    mempool = (
+        await get_mempool_transactions()
+    )
+
+    for tx in mempool:
+
+        received = (
+            amount_sent_to_address(
+                tx
+            )
+        )
+
+        if received <= 0:
+            continue
+
+        await inspect_transaction(
+            order,
+            tx
+        )
+
+        return
+
+    # Check confirmed history
+    confirmed = (
+        await get_confirmed_transactions()
+    )
+
+    for tx in confirmed:
+
+        received = (
+            amount_sent_to_address(
+                tx
+            )
+        )
+
+        if received <= 0:
+            continue
+
+        required = Decimal(
+            str(
+                order["required_ltc"]
+            )
+        )
+
+        if received == required:
+
+            await inspect_transaction(
+                order,
+                tx
+            )
+
+            return
+
+
+# ============================================================
+# PAYMENT LOOP
+# ============================================================
+
+async def payment_loop():
+
+    await bot.wait_until_ready()
+
+    while not bot.is_closed():
+
+        try:
+
+            orders = load_orders()
+
+            changed = False
+
+            for order_id, order in list(
+                orders.items()
+            ):
+
+                if order.get(
+                    "delivered"
+                ):
+                    continue
+
+                if order.get(
+                    "status"
+                ) in (
+                    "cancelled",
+                    "expired",
+                    "delivered"
+                ):
+                    continue
+
+                try:
+
+                    await check_order(
+                        order
+                    )
+
+                    orders[
+                        order_id
+                    ] = order
+
+                    changed = True
+
+                except Exception as error:
+
+                    print(
+                        f"[PAYMENT ERROR] "
+                        f"{order_id}: {error}"
+                    )
+
+            if changed:
+
+                save_orders(
+                    orders
+                )
+
+        except Exception as error:
+
+            print(
+                f"[PAYMENT LOOP ERROR] "
+                f"{error}"
+            )
+
+        await asyncio.sleep(
+            PAYMENT_CHECK_INTERVAL
+        )
+
+
+# ============================================================
+# LTC TEST
+# ============================================================
+
+@bot.command(
+    name="ltctest"
 )
 @commands.has_permissions(
     administrator=True
 )
-async def order_info(
-    ctx,
-    order_id: str
+async def ltctest(
+    ctx
 ):
 
-    order = orders.get(
-        order_id.upper()
-    )
-
-    if not order:
+    if not LTC_ADDRESS:
 
         return await ctx.send(
-            "❌ Order not found."
+            "❌ Put your LTC address in the code first."
         )
 
-    await ctx.send(
-        (
-            f"🧾 **Order `{order_id.upper()}`**\n\n"
-            f"User: <@{order['user_id']}>\n"
-            f"Product: `{order['product_id']}`\n"
-            f"Quantity: `{order['quantity']}`\n"
-            f"USD: `${order['total_usd']}`\n"
-            f"LTC: `{order['ltc_required']}`\n"
-            f"Status: `{order['status']}`\n"
-            f"TX: `{order.get('txid')}`\n"
-            f"Received: `{order.get('received_ltc')}`\n"
-            f"Confirmations: "
-            f"`{order.get('confirmations', 0)}`"
-        )
+    message = await ctx.send(
+        "🔎 Checking Litecoin API..."
     )
+
+    try:
+
+        price = await get_ltc_price()
+
+        mempool = (
+            await get_mempool_transactions()
+        )
+
+        confirmed = (
+            await get_confirmed_transactions()
+        )
+
+        embed = discord.Embed(
+            title="🔎 Litecoin Test",
+            color=EMBED_COLOR
+        )
+
+        embed.add_field(
+            name="🪙 LTC Address",
+            value=f"`{LTC_ADDRESS}`",
+            inline=False
+        )
+
+        embed.add_field(
+            name="💵 LTC Price",
+            value=(
+                f"${price:.2f}"
+                if price
+                else "Unavailable"
+            ),
+            inline=True
+        )
+
+        embed.add_field(
+            name="🔵 Pending",
+            value=str(
+                len(mempool)
+            ),
+            inline=True
+        )
+
+        embed.add_field(
+            name="🟢 Confirmed",
+            value=str(
+                len(confirmed)
+            ),
+            inline=True
+        )
+
+        await message.edit(
+            content=None,
+            embed=embed
+        )
+
+    except Exception as error:
+
+        await message.edit(
+            content=(
+                "❌ Litecoin test failed:\n"
+                f"```{error}```"
+            )
+        )
 
 
 # ============================================================
@@ -2292,45 +2293,45 @@ async def order_info(
 @bot.event
 async def on_ready():
 
+    ensure_data()
+
     print(
-        f"Logged in as "
-        f"{bot.user} ({bot.user.id})"
+        "===================================="
     )
 
-    valid = await validate_ltc_address()
+    print(
+        f"✅ Logged in as {bot.user}"
+    )
 
-    if not valid:
-        print(
-            "WARNING: LTC payment detection "
-            "may not work until LTC_ADDRESS is fixed."
-        )
+    print(
+        "🛒 AutoBuy Ticket System ONLINE"
+    )
 
-    if not payment_monitor.is_running():
+    print(
+        f"💰 LTC Address: {LTC_ADDRESS}"
+    )
 
-        payment_monitor.start()
+    print(
+        "📦 Stock System: ENABLED"
+    )
 
-        print(
-            "LTC payment monitor started."
-        )
+    print(
+        "🎟️ Ticket System: ENABLED"
+    )
 
+    print(
+        "===================================="
+    )
 
-# ============================================================
-# COMMAND ERROR
-# ============================================================
-
-@autobuy.error
-async def autobuy_error(
-    ctx,
-    error
-):
-
-    if isinstance(
-        error,
-        commands.MissingPermissions
+    if not hasattr(
+        bot,
+        "payment_task"
     ):
 
-        await ctx.send(
-            "❌ Administrator permission required."
+        bot.payment_task = (
+            asyncio.create_task(
+                payment_loop()
+            )
         )
 
 
@@ -2338,11 +2339,14 @@ async def autobuy_error(
 # START
 # ============================================================
 
+ensure_data()
+
 if not TOKEN:
 
     raise RuntimeError(
         "DISCORD_TOKEN is missing."
     )
 
-
-bot.run(TOKEN)
+bot.run(
+    TOKEN
+)
