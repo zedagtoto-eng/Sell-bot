@@ -1689,6 +1689,12 @@ async def on_ready():
         AutoBuyPanelView()
     )
 
+    @bot.command(name="clean")
+@commands.has_permissions(manage_channels=True)
+async def clean(ctx):
+    channel = ctx.channel
+
+    await channel.delete(reason=f"Cleaned by {ctx.author}")
 
 # ============================================================
 # RUN
