@@ -15,10 +15,10 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 PREFIX = "."
 
 # Your Discord User ID
-OWNER_ID = 123456789012345678
+OWNER_ID = 494442502632243200
 
 # Channel where reviews will be posted
-REVIEWS_CHANNEL_ID = 123456789012345678
+REVIEWS_CHANNEL_ID = 1556289345261019136
 
 # Saved Litecoin address file
 DATA_FILE = "address.json"
